@@ -62,6 +62,56 @@ export async function POST(
     const files = latestFragment.files as Record<string, string>;
     const errorText = typeof error === "string" ? error : JSON.stringify(error);
 
+    // ══════════════════════════════════════════════════════════════════════
+    // FAST-PATH: Instant fixes for known error patterns — NO AI call needed
+    // Target: <2s instead of 27s
+    // ══════════════════════════════════════════════════════════════════════
+    const instantFix = tryInstantFix(errorText, files);
+    if (instantFix) {
+      console.log(`[Autofix] ⚡ INSTANT FIX (no AI): ${instantFix.explanation}`);
+
+      // Auto-heal the fixed files
+      const healedFiles = autoHealAllFiles({ ...files, ...instantFix.files });
+      const updatedFiles = { ...files, ...Object.fromEntries(
+        Object.keys(instantFix.files).map(k => [k, healedFiles[k] || instantFix.files[k]])
+      )};
+
+      // Save to DB
+      await prisma.fragment.update({
+        where: { id: latestFragment.id },
+        data: { files: updatedFiles },
+      });
+
+      // Write to sandbox
+      const sandboxId = project.sandboxId;
+      if (sandboxId) {
+        try {
+          const sandbox = await Sandbox.connect(sandboxId);
+          const homeDir = SANDBOX_WORKSPACE_DIR;
+          await Promise.all(
+            Object.entries(instantFix.files).map(async ([path, content]) => {
+              const dir = path.substring(0, path.lastIndexOf("/"));
+              if (dir) await sandbox.commands.run(`mkdir -p '${homeDir}/${dir}'`, { timeoutMs: 3000 }).catch(() => {});
+              return sandbox.files.write(`${homeDir}/${path}`, content);
+            })
+          );
+        } catch (e) {
+          console.warn("[Autofix] Sandbox write failed for instant fix:", e);
+        }
+      }
+
+      const totalMs = Date.now() - t0;
+      console.log(`[Autofix] ⚡ Instant fix done in ${totalMs}ms`);
+      return NextResponse.json({
+        ok: true,
+        fixed: Object.keys(instantFix.files),
+        explanation: instantFix.explanation,
+        ready: true,
+        instant: true,
+        duration: totalMs,
+      });
+    }
+
     // 2. SURGICAL FILE EXTRACTION — only files mentioned in error + core files
     const relevantFiles: Record<string, string> = {};
 
@@ -203,4 +253,107 @@ export async function POST(
     console.error("[Autofix API] Error:", err);
     return NextResponse.json({ error: err.message, duration: Date.now() - t0 }, { status: 500 });
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// INSTANT FIX ENGINE — Pattern-matched fixes that skip AI entirely
+// Each fix takes <100ms instead of 15-30s
+// ══════════════════════════════════════════════════════════════════════════
+
+type InstantFixResult = { files: Record<string, string>; explanation: string } | null;
+
+function tryInstantFix(errorText: string, files: Record<string, string>): InstantFixResult {
+
+  // ── FIX 1: "Export X doesn't exist" with "Did you mean Y?" ──
+  // Error: Export getMovies doesn't exist in target module
+  // Did you mean to import categories?
+  const exportMismatch = errorText.match(
+    /Export\s+(\w+)\s+doesn't exist in target module/i
+  );
+  const didYouMean = errorText.match(
+    /Did you mean to import\s+(\w+)\s*\?/i
+  );
+  const errorFilePath = errorText.match(
+    /\.\/(?:app\/)?([^\s(]+\.tsx?)\s*\(/
+  );
+
+  if (exportMismatch && didYouMean && errorFilePath) {
+    const wrongName = exportMismatch[1];
+    const correctName = didYouMean[1];
+    const rawPath = errorFilePath[1];
+
+    // Find the file in our files map
+    const candidates = [rawPath, `app/${rawPath}`, rawPath.replace(/^app\//, "")];
+    for (const candidate of candidates) {
+      if (files[candidate]) {
+        const fixed = files[candidate].replace(
+          new RegExp(`\\b${wrongName}\\b`, 'g'),
+          correctName
+        );
+        if (fixed !== files[candidate]) {
+          return {
+            files: { [candidate]: fixed },
+            explanation: `Fixed import: ${wrongName} → ${correctName} in ${candidate}`,
+          };
+        }
+      }
+    }
+  }
+
+  // ── FIX 2: Missing postcss.config.mjs ──
+  if (errorText.match(/postcss/i) && !files["postcss.config.mjs"] && !files["postcss.config.js"]) {
+    return {
+      files: {
+        "postcss.config.mjs": `/** @type {import('postcss-load-config').Config} */\nconst config = {\n  plugins: {\n    "@tailwindcss/postcss": {},\n  },\n};\n\nexport default config;\n`,
+      },
+      explanation: "Created missing postcss.config.mjs for Tailwind v4",
+    };
+  }
+
+  // ── FIX 3: Missing "use client" ──
+  const useClientMatch = errorText.match(
+    /(?:useState|useEffect|useRef|useCallback|useMemo|useRouter|onClick|onChange).*(?:is not a function|cannot be used|only works in Client Components)/i
+  );
+  const useClientFile = errorText.match(/\.\/(?:app\/)?([^\s(]+\.tsx?)/);
+  if (useClientMatch && useClientFile) {
+    const filePath = useClientFile[1];
+    const candidates = [filePath, `app/${filePath}`, filePath.replace(/^app\//, "")];
+    for (const candidate of candidates) {
+      if (files[candidate] && !files[candidate].startsWith('"use client"') && !files[candidate].startsWith("'use client'")) {
+        return {
+          files: { [candidate]: `"use client";\n\n${files[candidate]}` },
+          explanation: `Added missing "use client" directive to ${candidate}`,
+        };
+      }
+    }
+  }
+
+  // ── FIX 4: Module not found for @/ imports ──
+  const moduleNotFound = errorText.match(
+    /Module not found.*['"]@\/([^'"]+)['"]/i
+  );
+  if (moduleNotFound) {
+    const missingPath = moduleNotFound[1];
+    // Check if the file exists with different extension
+    const extensions = [".ts", ".tsx", "/index.ts", "/index.tsx"];
+    for (const ext of extensions) {
+      const tryPath = missingPath + ext;
+      if (files[tryPath]) {
+        // File exists but import path is wrong — likely needs the extension stripped
+        // This is handled by auto-heal, but we can log it
+        break;
+      }
+    }
+    // If it's a lib/utils missing, create it
+    if (missingPath === "lib/utils" && !files["lib/utils.ts"]) {
+      return {
+        files: {
+          "lib/utils.ts": `import { clsx, type ClassValue } from "clsx";\nimport { twMerge } from "tailwind-merge";\n\nexport function cn(...inputs: ClassValue[]) {\n  return twMerge(clsx(inputs));\n}\n`,
+        },
+        explanation: "Created missing lib/utils.ts with cn() helper",
+      };
+    }
+  }
+
+  return null; // No instant fix available — fall through to AI
 }
