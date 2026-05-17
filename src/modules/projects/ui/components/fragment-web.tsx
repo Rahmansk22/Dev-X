@@ -336,6 +336,11 @@ export function FragmentWeb({ data, projectId }: Props) {
       if (res.ok) {
         setAutoFixTriggered(true);
         setBuildError(null);
+        // Auto-refresh preview after fix — give HMR 2.5s to recompile
+        setTimeout(() => {
+          setRefreshIdx(i => i + 1);
+          setAutoFixTriggered(false);
+        }, 2500);
       }
     } catch (e) {
       console.error('[FragmentWeb] Auto-fix request failed:', e);
@@ -528,6 +533,8 @@ function ErrorState({ error, onReconnect, isReconnecting, sandboxUrl, projectId,
       });
       if (res.ok) {
         setFixTriggered(true);
+        // Auto-reload after fix to show the working preview
+        setTimeout(() => window.location.reload(), 3000);
       }
     } catch (e) {
       console.error("[ErrorState] Auto-fix request failed:", e);
