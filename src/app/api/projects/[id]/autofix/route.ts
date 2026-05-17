@@ -6,32 +6,51 @@ import { SANDBOX_WORKSPACE_DIR } from "@/lib/sandbox-preview";
 import { autoHealAllFiles } from "@/lib/auto-heal-imports";
 
 /**
- * TURBO AUTOFIX — Surgical error fixer. Target: <10s total.
+ * TURBO AUTOFIX — Fixes errors exactly like a senior developer would.
  *
- * Strategy: Senior dev approach — read error, find broken file, fix ONLY that.
- * No bloated prompts. No full app regen. No server restart (HMR handles it).
+ * Strategy: Read error → Find file → Read code → Understand context → Surgical fix
+ * No guessing. No touching unrelated files. Fix the exact root cause.
  */
 
-const SURGICAL_FIX_PROMPT = `You are an expert Next.js 15 debugger. Fix the EXACT error. Nothing else.
+const SURGICAL_FIX_PROMPT = `You are a senior Next.js developer debugging a build error. Think step by step:
 
-TECH STACK (do NOT change these):
-- Next.js 15.4.10, React 19, TypeScript
-- Tailwind CSS v4 (use @import "tailwindcss" in globals.css, NO tailwind.config, NO @apply)
-- In globals.css @layer components: ONLY simple CSS class names (.glass-card, .glow-text)
-  NEVER use Tailwind utility names as selectors (.bg-slate-900/40 = INVALID, "/" breaks CSS parser)
-- "use client" on line 1 for any file using hooks/events/browser APIs
-- Import shadcn from exact paths: import { Button } from "@/components/ui/button"
-- Toasts: import { toast } from "sonner" (NEVER useToast)
-- Escape JSX: It&apos;s not It's
+STEP 1: READ THE ERROR
+- What is the exact error message?
+- Which file is the error in? What line number?
+- What is the error TYPE? (import mismatch, missing module, syntax error, etc.)
 
-RULES:
-- Return ONLY changed/new files as JSON
-- Do NOT return unchanged files
-- Fix the ROOT CAUSE, not symptoms
-- If missing file → create it. If bad import → fix import. If bad CSS → fix CSS.
+STEP 2: FIND THE ROOT CAUSE
+- Read the code at the error location
+- If it's an import error: What does the import expect? What does the target file actually export?
+- If it's a missing file: What file is being imported? Does it need to be created?
+- If it's a syntax error: What's the malformed code? What should it be?
+- If it's a type error: What type is expected vs what's provided?
 
-OUTPUT (JSON only, no markdown):
-{ "files": { "path/file.tsx": "fixed code" }, "explanation": "what was fixed" }`;
+STEP 3: MAKE THE MINIMUM FIX
+- Change ONLY the broken line(s). Do NOT rewrite entire files.
+- Do NOT add unrelated features, styles, or improvements.
+- Do NOT touch files that aren't mentioned in the error.
+- Return the COMPLETE fixed file (not just a diff).
+
+COMMON FIXES (use these patterns):
+- "Export X doesn't exist" → Change the import name to match the actual export
+- "Module not found @/lib/X" → Create the missing file with proper exports
+- "use client" error → Add "use client"; as line 1
+- "Cannot find module" → Fix the import path or create the file
+- PostCSS error → Create postcss.config.mjs with @tailwindcss/postcss
+- Unescaped entity → Replace ' with &apos; and " with &quot; in JSX text
+- Unused variable → Remove it or prefix with _
+- Hook in conditional → Move hook to top level before any if/return
+
+TECH STACK (never change these):
+- Next.js 15, React 19, TypeScript, Tailwind CSS v4
+- Tailwind v4: @import "tailwindcss" in globals.css, NO tailwind.config, NO @apply
+- shadcn: import { Button } from "@/components/ui/button"
+- Toast: import { toast } from "sonner"
+
+OUTPUT FORMAT (strict JSON, no markdown, no \`\`\`):
+{ "files": { "path/file.tsx": "complete fixed file content" }, "explanation": "1-line: what was wrong and what you changed" }`;
+
 
 export async function POST(
   req: NextRequest,
@@ -165,25 +184,38 @@ export async function POST(
 
     console.log(`[Autofix] 🔍 ${Object.keys(relevantFiles).length} relevant files (${Object.keys(relevantFiles).join(", ")}) in ${Date.now() - t0}ms`);
 
-    // 3. BUILD A SURGICAL DIAGNOSIS — Tell AI exactly what's wrong
+    // 3. BUILD THE FIX TICKET — Like a tech lead assigning a bug to a senior dev
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "AI API key not configured" }, { status: 500 });
 
     // Parse error into structured diagnosis
     const diagnosis = buildDiagnosis(errorText);
 
-    const userPrompt = `## DIAGNOSIS
+    // List ALL file paths so AI knows what exists in the project
+    const allFilePaths = Object.keys(files).sort();
+
+    const userPrompt = `## BUG TICKET
+
+### Error
+${errorText.slice(0, 600)}
+
+### Diagnosis
 ${diagnosis}
 
-## RAW ERROR
-${errorText.slice(0, 800)}
+### All Files in Project (${allFilePaths.length} total)
+${allFilePaths.join("\n")}
 
-## PROJECT FILES (only relevant ones)
+### Source Code (files involved in error)
 ${Object.entries(relevantFiles)
-  .map(([p, c]) => `### ${p}\n\`\`\`\n${c}\n\`\`\``)
+  .map(([p, c]) => `--- ${p} ---\n${c}`)
   .join("\n\n")}
 
-IMPORTANT: Fix ONLY the file(s) causing the error above. Do NOT touch unrelated files.`;
+### Your Task
+1. Read the error and source code above
+2. Find the EXACT line causing the error
+3. Fix ONLY that issue — minimum change possible
+4. Return the complete fixed file(s) as JSON
+5. Do NOT return files you didn't change`;
 
     const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
