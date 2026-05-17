@@ -322,6 +322,110 @@ export function autoHealAllFiles(files: Record<string, string>): Record<string, 
     console.log(`[auto-heal] 🩹 Fixed ${totalFixes} missing imports across ${Object.keys(healed).length} files`);
   }
 
+  // ── Cross-File Import/Export Validation ──
+  // Scans all files for named imports from @/ paths, verifies the target file
+  // actually exports those names. If not, rewrites the import to use the closest matching export.
+  let crossFileFixes = 0;
+  for (const [filePath, content] of Object.entries(healed)) {
+    if (!/\.(tsx?|jsx?)$/.test(filePath)) continue;
+
+    // Find all named imports from @/ paths
+    const importRegex = /import\s*\{([^}]+)\}\s*from\s*['"]@\/([^'"]+)['"]/g;
+    let importMatch;
+    let fixedContent = content;
+
+    while ((importMatch = importRegex.exec(content)) !== null) {
+      const importedNames = importMatch[1].split(",").map(s => s.trim().split(" as ")[0].trim()).filter(Boolean);
+      const importPath = importMatch[2]; // e.g., "lib/data"
+
+      // Resolve the target file path (try .ts, .tsx, /index.ts, /index.tsx)
+      const candidates = [
+        importPath + ".ts",
+        importPath + ".tsx",
+        importPath + "/index.ts",
+        importPath + "/index.tsx",
+        importPath,
+      ];
+
+      let targetContent: string | undefined;
+      for (const candidate of candidates) {
+        if (healed[candidate]) {
+          targetContent = healed[candidate];
+          break;
+        }
+        // Also try with app/ prefix
+        if (healed["app/" + candidate]) {
+          targetContent = healed["app/" + candidate];
+          break;
+        }
+      }
+
+      if (!targetContent) continue; // Can't validate — file not in this generation batch
+
+      // Extract all exports from the target file
+      const exportNames = new Set<string>();
+      // Named exports: export const/function/class Name
+      const namedExportRegex = /export\s+(?:const|let|function|class|type|interface|enum|async\s+function)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
+      let em;
+      while ((em = namedExportRegex.exec(targetContent)) !== null) {
+        exportNames.add(em[1]);
+      }
+      // Destructured exports: export const { a, b } = ...
+      const destructuredExportRegex = /export\s+const\s+\{([^}]+)\}/g;
+      while ((em = destructuredExportRegex.exec(targetContent)) !== null) {
+        em[1].split(",").forEach(s => {
+          const name = s.trim().split(":")[0].trim();
+          if (name) exportNames.add(name);
+        });
+      }
+      // Re-exports: export { Name } from "..."
+      const reExportRegex = /export\s*\{([^}]+)\}/g;
+      while ((em = reExportRegex.exec(targetContent)) !== null) {
+        em[1].split(",").forEach(s => {
+          const name = s.trim().split(" as ").pop()?.trim();
+          if (name) exportNames.add(name);
+        });
+      }
+
+      if (exportNames.size === 0) continue;
+
+      // Check each imported name against the exports
+      for (const importedName of importedNames) {
+        if (exportNames.has(importedName)) continue; // ✅ Valid
+
+        // ❌ Mismatch! Try fuzzy match by function purpose
+        const exportArray = Array.from(exportNames);
+        // Find closest match by lowercase similarity
+        const lowerImport = importedName.toLowerCase();
+        const bestMatch = exportArray.find(e => {
+          const le = e.toLowerCase();
+          // Check if they share key words (e.g., getMovies ↔ getCategories both start with "get")
+          return le.includes(lowerImport.slice(3)) || lowerImport.includes(le.slice(3));
+        }) || exportArray.find(e => e.toLowerCase().startsWith(lowerImport.slice(0, 3)));
+
+        if (bestMatch) {
+          // Replace the specific import name
+          fixedContent = fixedContent.replace(
+            new RegExp(`\\b${importedName}\\b`, 'g'),
+            bestMatch
+          );
+          console.log(`[cross-file-heal] 🔗 ${filePath}: ${importedName} → ${bestMatch} (from @/${importPath})`);
+          crossFileFixes++;
+        } else {
+          console.warn(`[cross-file-heal] ⚠️ ${filePath}: import { ${importedName} } from "@/${importPath}" — export not found! Available: ${exportArray.join(", ")}`);
+        }
+      }
+    }
+
+    if (fixedContent !== content) {
+      healed[filePath] = fixedContent;
+    }
+  }
+
+  if (crossFileFixes > 0) {
+    console.log(`[cross-file-heal] 🔗 Fixed ${crossFileFixes} import/export mismatches`);
+  }
+
   return healed;
 }
 

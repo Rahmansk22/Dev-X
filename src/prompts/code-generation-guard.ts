@@ -238,8 +238,21 @@ Hallucination Alert (CRITICAL):
   ❌ import Providers from "@/components/providers"
      (But components/providers.tsx uses 'export function Providers') ← FAIL (Mixed default/named)
 
+CROSS-FILE EXPORT NAME MATCHING (CRITICAL — BUILD BREAKER):
+  ❌ import { getMovies } from "@/lib/data"
+     (But lib/data.ts exports: categories, getCategories) ← FAIL: getMovies does NOT exist
+  
+  ❌ import { fetchPosts } from "@/lib/api"
+     (But lib/api.ts exports: getPosts, createPost) ← FAIL: fetchPosts does NOT exist
+  
+  ✅ BEFORE writing any import, verify the EXACT export name in the target file.
+  ✅ If you create lib/data.ts with "export function getCategories()", 
+     then page.tsx MUST import { getCategories } — NOT { getMovies }.
+  ✅ The function/variable name in the import MUST be IDENTICAL to the export name.
+
   ✅ I have verified that EVERY file I import from exists in my generation queue.
   ✅ I have verified that Default Imports match Default Exports.
+  ✅ I have verified that EVERY named import matches an actual named export in the target file.
 \`\`\`
 
 ### BLOCK 13: STYLING & LAYOUT AUDIT
