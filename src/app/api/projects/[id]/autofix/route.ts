@@ -112,36 +112,78 @@ export async function POST(
       });
     }
 
-    // 2. SURGICAL FILE EXTRACTION — only files mentioned in error + core files
+    // 2. SMART FILE EXTRACTION — Parse error to find EXACT files involved
     const relevantFiles: Record<string, string> = {};
 
-    for (const [path, content] of Object.entries(files)) {
-      const baseName = path.split("/").pop() || "";
-      const isErrorFile = errorText.includes(baseName) || errorText.includes(path);
-      const isCoreFile = path === "app/globals.css" || path === "app/layout.tsx" ||
-        path === "src/app/layout.tsx" || path === "package.json";
+    // Extract file paths mentioned in the error (./app/page.tsx, [project]/app/lib/data.ts, etc.)
+    const mentionedPaths = new Set<string>();
+    const pathPatterns = [
+      /\.\/(?:app\/)?([^\s(]+\.tsx?)/g,          // ./app/page.tsx (5:1)
+      /\[project\]\/(?:app\/)?([^\s[\]]+\.tsx?)/g, // [project]/app/lib/data.ts
+      /['"]@\/([^'"]+)['"]/g,                     // '@/lib/data'
+      /(?:^|\s)(app\/[^\s(]+\.(?:tsx?|css|mjs))/gm, // app/page.tsx standalone
+    ];
+    for (const pattern of pathPatterns) {
+      let m;
+      while ((m = pattern.exec(errorText)) !== null) {
+        const rawPath = m[1].replace(/^app\//, ""); // normalize
+        mentionedPaths.add(rawPath);
+        mentionedPaths.add(`app/${rawPath}`);
+        // Also try adding extensions for alias paths (@/lib/data → lib/data.ts)
+        if (!rawPath.match(/\.\w+$/)) {
+          mentionedPaths.add(`${rawPath}.ts`);
+          mentionedPaths.add(`${rawPath}.tsx`);
+          mentionedPaths.add(`app/${rawPath}.ts`);
+          mentionedPaths.add(`app/${rawPath}.tsx`);
+        }
+      }
+    }
 
-      if (isErrorFile || isCoreFile) {
+    // Match mentioned paths against actual files
+    for (const [path, content] of Object.entries(files)) {
+      const isDirectMatch = mentionedPaths.has(path);
+      const isBaseNameMatch = Array.from(mentionedPaths).some(mp => path.endsWith(mp));
+      if (isDirectMatch || isBaseNameMatch) {
         relevantFiles[path] = content;
       }
     }
 
-    // If nothing matched, include all TSX files (small project)
+    // Always include core files that affect builds
+    const coreFiles = ["app/globals.css", "app/layout.tsx", "package.json", "postcss.config.mjs"];
+    for (const core of coreFiles) {
+      if (files[core] && !relevantFiles[core]) {
+        relevantFiles[core] = files[core];
+      }
+    }
+
+    // Fallback: if nothing matched, include all TSX files
     if (Object.keys(relevantFiles).length <= 1) {
       for (const [path, content] of Object.entries(files)) {
         if (/\.(tsx?|css)$/.test(path)) relevantFiles[path] = content;
       }
     }
 
-    console.log(`[Autofix] 🔍 ${Object.keys(relevantFiles).length} relevant files in ${Date.now() - t0}ms`);
+    console.log(`[Autofix] 🔍 ${Object.keys(relevantFiles).length} relevant files (${Object.keys(relevantFiles).join(", ")}) in ${Date.now() - t0}ms`);
 
-    // 3. FAST AI CALL — lean prompt, fast model
+    // 3. BUILD A SURGICAL DIAGNOSIS — Tell AI exactly what's wrong
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "AI API key not configured" }, { status: 500 });
 
-    const userPrompt = `## ERROR:\n${errorText}\n\n## FILES:\n${Object.entries(relevantFiles)
-      .map(([p, c]) => `### ${p}\n\`\`\`\n${c}\n\`\`\``)
-      .join("\n\n")}`;
+    // Parse error into structured diagnosis
+    const diagnosis = buildDiagnosis(errorText);
+
+    const userPrompt = `## DIAGNOSIS
+${diagnosis}
+
+## RAW ERROR
+${errorText.slice(0, 800)}
+
+## PROJECT FILES (only relevant ones)
+${Object.entries(relevantFiles)
+  .map(([p, c]) => `### ${p}\n\`\`\`\n${c}\n\`\`\``)
+  .join("\n\n")}
+
+IMPORTANT: Fix ONLY the file(s) causing the error above. Do NOT touch unrelated files.`;
 
     const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -253,6 +295,74 @@ export async function POST(
     console.error("[Autofix API] Error:", err);
     return NextResponse.json({ error: err.message, duration: Date.now() - t0 }, { status: 500 });
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// DIAGNOSTIC ENGINE — Parses raw errors into structured senior-dev diagnosis
+// Tells AI exactly what's wrong so it doesn't guess
+// ══════════════════════════════════════════════════════════════════════════
+
+function buildDiagnosis(errorText: string): string {
+  const lines: string[] = [];
+
+  // Extract file + line number
+  const fileLineMatch = errorText.match(/\.\/(?:app\/)?([^\s(]+\.tsx?)\s*\((\d+):(\d+)\)/);
+  if (fileLineMatch) {
+    lines.push(`📍 ERROR LOCATION: ${fileLineMatch[1]} at line ${fileLineMatch[2]}, column ${fileLineMatch[3]}`);
+  }
+
+  // Export mismatch
+  const exportMismatch = errorText.match(/Export\s+(\w+)\s+doesn't exist in target module/i);
+  const didYouMean = errorText.match(/Did you mean to import\s+(\w+)\s*\?/i);
+  const targetModule = errorText.match(/\[project\]\/(?:app\/)?([^\s[\]]+\.tsx?)/);
+  if (exportMismatch) {
+    lines.push(`🔴 TYPE: Import/Export Mismatch`);
+    lines.push(`❌ WRONG: import { ${exportMismatch[1]} } — this export does NOT exist`);
+    if (didYouMean) lines.push(`✅ FIX: Change to import { ${didYouMean[1]} } — this is the actual export name`);
+    if (targetModule) lines.push(`📁 TARGET MODULE: ${targetModule[1]} — check this file's exports`);
+    if (fileLineMatch) lines.push(`📝 ACTION: In ${fileLineMatch[1]}, replace "${exportMismatch[1]}" with "${didYouMean?.[1] || 'the correct export name'}" on line ${fileLineMatch[2]}`);
+  }
+
+  // Module not found
+  const moduleNotFound = errorText.match(/Module not found.*['"]([^'"]+)['"]/i);
+  if (moduleNotFound) {
+    lines.push(`🔴 TYPE: Module Not Found`);
+    lines.push(`❌ MISSING: ${moduleNotFound[1]}`);
+    lines.push(`✅ FIX: Create the missing file, or fix the import path`);
+  }
+
+  // Use client error
+  if (errorText.match(/only works in Client Components/i) || errorText.match(/cannot be used.*Server Component/i)) {
+    lines.push(`🔴 TYPE: Missing "use client" Directive`);
+    lines.push(`✅ FIX: Add "use client"; as the FIRST line of the file that uses hooks/events`);
+  }
+
+  // Syntax error
+  if (errorText.match(/SyntaxError|Unexpected token|parsing error/i)) {
+    lines.push(`🔴 TYPE: Syntax Error`);
+    lines.push(`✅ FIX: Check for unclosed brackets, missing semicolons, or invalid JSX`);
+  }
+
+  // PostCSS / Tailwind
+  if (errorText.match(/postcss|@tailwindcss/i)) {
+    lines.push(`🔴 TYPE: PostCSS/Tailwind Configuration Error`);
+    lines.push(`✅ FIX: Ensure postcss.config.mjs exists with @tailwindcss/postcss plugin`);
+  }
+
+  // Unescaped JSX entities
+  if (errorText.match(/Unterminated string|apostrophe|quote/i)) {
+    lines.push(`🔴 TYPE: Unescaped Character in JSX`);
+    lines.push(`✅ FIX: Replace ' with &apos; and " with &quot; in JSX text content`);
+  }
+
+  // Fallback
+  if (lines.length === 0) {
+    lines.push(`🔴 TYPE: Build Error (unclassified)`);
+    lines.push(`📍 Analyze the error message carefully and fix the ROOT CAUSE`);
+    lines.push(`⚠️ Do NOT fix unrelated files — fix ONLY what the error describes`);
+  }
+
+  return lines.join("\n");
 }
 
 // ══════════════════════════════════════════════════════════════════════════
