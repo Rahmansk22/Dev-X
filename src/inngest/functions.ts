@@ -890,7 +890,9 @@ ${systemPrompt}`,
         // DeepSeek V4 Flash doesn't support tool_choice: "required" — use "auto"
         // Grok/GPT support "required" but "auto" works for all providers
         const toolChoiceValue = modelName.includes("deepseek") ? "auto" : "required";
-        const maxTokensValue = modelName.includes("deepseek") ? 8192 : 128000;
+        // DeepSeek V4 Flash supports up to 65K output tokens. 8192 was causing truncation
+        // (completion=8394 → JSON broke → app/page.tsx lost). 16384 is safe headroom.
+        const maxTokensValue = modelName.includes("deepseek") ? 16384 : 128000;
 
         const apiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
@@ -1247,7 +1249,7 @@ ${CODE_GENERATION_GUARD}
       }
 
       if (totalInitialFiles === 0 || missingRequiredFiles.length > 0) {
-        const recoveryLimit = 1; // ⚡ SPEED: 1 attempt max, not 3
+        const recoveryLimit = 2; // Give recovery 2 chances to fill missing files
         for (let attempt = 1; attempt <= recoveryLimit; attempt++) {
           const recovery = await step.run(`recover-required-files-${attempt}`, async () => {
             const workingFiles: Record<string, string> = {
