@@ -1,0 +1,7 @@
+# E2B Template Configuration
+# Build: cd e2b-template && e2b template build --name builder
+# This creates a template with pre-installed Next.js deps
+
+template_id = ""
+dockerfile = "e2b.Dockerfile"
+template_name = "builder"

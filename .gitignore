@@ -1,0 +1,21 @@
+node_modules/
+.next/
+dist/
+build/
+coverage/
+
+.env
+.env.local
+.env.*.local
+
+*.log
+dev-output.log
+
+.DS_Store
+Thumbs.db
+
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# AI Productivity Tools
+.ai-tools/

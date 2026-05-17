@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "../../../../.."
+		}
+	],
+	"settings": {
+		"chat.agent.maxRequests": 250,
+		"chatgpt.openOnStartup": true
+	}
+}

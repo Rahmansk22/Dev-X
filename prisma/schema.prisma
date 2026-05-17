@@ -1,0 +1,186 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id String @id @default(uuid())
+  userId String
+  name String
+  description String?
+  status String @default("active") // active | archived | deleted
+  currentVersion Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sandboxId String?
+  isRunning Boolean @default(false)
+  activeRunId String?
+
+  snapshots ProjectSnapshot[]
+  deployments Deployment[]
+  buildHistory BuildHistory[]
+  messages Message[]
+  memories Memory[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model ProjectSnapshot {
+  id String @id @default(uuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version Int
+  timestamp DateTime @default(now())
+  description String?
+  
+  // Store all files as JSON
+  files Json // { [filename]: content }
+  buildSuccess Boolean
+  buildLog String?
+  
+  // Metadata
+  errorCount Int @default(0)
+  totalEdits Int @default(0)
+  authorEmail String?
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([projectId, version])
+  @@index([projectId])
+  @@index([buildSuccess])
+}
+
+model Deployment {
+  id String @id @default(uuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version Int
+  
+  provider String // vercel | railway | fly | netlify
+  status String @default("pending") // pending | success | failed
+  deploymentUrl String?
+  deploymentId String?
+  
+  duration Int? // seconds
+  metadata Json? // provider-specific metadata
+  error String?
+  
+  deployedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  
+  @@index([projectId])
+  @@index([status])
+  @@index([deployedAt])
+}
+
+model BuildHistory {
+  id String @id @default(uuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  success Boolean
+  buildLog String?
+  errors Json? // Array of build errors
+  warnings Json? // Array of warnings
+  
+  buildTime Int? // seconds
+  routesGenerated Int?
+  
+  timestamp DateTime @default(now())
+  
+  @@index([projectId])
+  @@index([success])
+  @@index([timestamp])
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+enum MessageType {
+  RESULT
+  ERROR
+  QUESTION
+  ANALYSIS
+}
+
+model Message {
+  id        String     @id @default(uuid())
+  content   String
+
+  role      MessageRole
+  type      MessageType
+  
+  // SUPER DEV X: Analysis & Context
+  isAnalyzed Boolean @default(false)
+  isDetailed Boolean @default(false)
+  questionsAsked Json? // Array of questions asked by agent
+  contextData    Json? // Store user answers and requirements
+  confidenceScore Int @default(0) // 0-100: how confident about requirements
+
+  // Real-time file tracking
+  fileActions Json? // Array of { type: 'add'|'modify'|'delete', file: string, details: string, timestamp: number }
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  
+  projectId String
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  fragment  Fragment?
+}
+
+model Fragment {
+  id         String   @id @default(uuid())
+  messageId  String   @unique
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  sandboxUrl String
+  title      String
+  files      Json
+  summary    String?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Usage {
+  key String @id
+  points Int
+  expire DateTime?
+}
+
+model Deploy {
+  id        String   @id @default(uuid())
+  userId    String
+  projectId String
+
+  url       String?
+  status    String   // SUCCESS | FAILED | ROLLED_BACK
+  createdAt DateTime @default(now())
+
+  error     String?
+}
+
+model Memory {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  key       String   // e.g. "design_system", "database_choice"
+  value     String   // The content of the memory
+  category  String   // design, engineering, business, tech_stack
+  confidence Float   @default(1.0)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, key])
+  @@index([projectId])
+}
