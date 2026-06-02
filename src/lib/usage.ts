@@ -8,12 +8,19 @@ import { auth } from "@clerk/nextjs/server";
 
 const FREE_POINTS = 5;
 const PRO_POINTS = 25;
-const DURATION = 30 * 24 * 60 *60;  //30 days
+const DURATION = 30 * 24 * 60 * 60;  // 30 days
 const GENERATION_COST = 1;
 
-export async function getUsageTracker() {
+export async function getUsageTracker(providedUserId?: string) {
+  let userId = providedUserId || process.env.MOCK_USER_ID;
+  if (!userId) {
+    try {
+      userId = (await auth()).userId || undefined;
+    } catch (err) {
+      console.error("[UsageTracker] Failed to retrieve auth() userId:", err);
+    }
+  }
 
-  const { userId } = await auth();
   let hasPremiumAccess = false;
 
   if (userId) {
@@ -31,28 +38,42 @@ export async function getUsageTracker() {
   });
 
   return usageTracker;
-};
+}
 
-export async function consumeCredits () {
-  const { userId } = await auth()
+export async function consumeCredits(providedUserId?: string) {
+  let userId = providedUserId || process.env.MOCK_USER_ID;
+  if (!userId) {
+    try {
+      userId = (await auth()).userId || undefined;
+    } catch (err) {
+      console.error("[consumeCredits] Failed to retrieve auth() userId:", err);
+    }
+  }
 
   if (!userId) {
     throw new Error("Unauthorized");
   }
 
-  const usageTracker = await getUsageTracker();
+  const usageTracker = await getUsageTracker(userId);
   const result = await usageTracker.consume(userId, GENERATION_COST);
   return result;
-};
+}
 
-export async function getUsageStatus() {
-  const { userId } = await auth()
+export async function getUsageStatus(providedUserId?: string) {
+  let userId = providedUserId || process.env.MOCK_USER_ID;
+  if (!userId) {
+    try {
+      userId = (await auth()).userId || undefined;
+    } catch (err) {
+      console.error("[getUsageStatus] Failed to retrieve auth() userId:", err);
+    }
+  }
 
   if (!userId) {
     throw new Error("Unauthorized");
   }
 
-  const usageTracker = await getUsageTracker();
+  const usageTracker = await getUsageTracker(userId);
   const result = await usageTracker.get(userId);        //getPoints(userId)
   return result;
 }

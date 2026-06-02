@@ -134,7 +134,7 @@ export const projectsRouter = createTRPCRouter({
       // 1. Credits
       const startCredits = Date.now();
       try {
-        await consumeCredits();
+        await consumeCredits(ctx.auth.userId || undefined);
       } catch (creditsError: any) {
         console.error("[Procedures] Credit consumption failed:", creditsError);
         throw new TRPCError({

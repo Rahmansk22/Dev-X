@@ -85,7 +85,7 @@ export const messagesRouter = createTRPCRouter({
       }
 
       try {
-        await consumeCredits();
+        await consumeCredits(ctx.auth.userId || undefined);
       } catch (creditsError: any) {
         console.error("[Procedures] Message credit consumption failed:", creditsError);
         throw new TRPCError({
