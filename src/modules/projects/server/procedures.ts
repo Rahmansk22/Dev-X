@@ -149,9 +149,12 @@ export const projectsRouter = createTRPCRouter({
         } catch (dbErr) {
           console.error("Failed to log credit error to database:", dbErr);
         }
+        const errMsg = (creditsError instanceof Error || (creditsError && typeof creditsError === 'object' && 'message' in creditsError))
+          ? `Credit check failed: ${creditsError.message || String(creditsError)}`
+          : "You have reached your usage limit";
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
-          message: "You have reached your usage limit",
+          message: errMsg,
         });
       }
       timings.consumeCredits = Date.now() - startCredits;

@@ -100,9 +100,12 @@ export const messagesRouter = createTRPCRouter({
         } catch (dbErr) {
           console.error("Failed to log credit error to database:", dbErr);
         }
+        const errMsg = (creditsError instanceof Error || (creditsError && typeof creditsError === 'object' && 'message' in creditsError))
+          ? `Credit check failed: ${creditsError.message || String(creditsError)}`
+          : "You have reached your limit of requests";
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
-          message: "You have reached your limit of requests",
+          message: errMsg,
         });
       }
 
