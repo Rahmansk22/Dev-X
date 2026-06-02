@@ -137,6 +137,18 @@ export const projectsRouter = createTRPCRouter({
         await consumeCredits(ctx.auth.userId || undefined);
       } catch (creditsError: any) {
         console.error("[Procedures] Credit consumption failed:", creditsError);
+        try {
+          await prisma.deploy.create({
+            data: {
+              userId: ctx.auth.userId || "unknown",
+              projectId: "limit_debug_project",
+              status: "FAILED",
+              error: `[Projects.create] ${creditsError?.stack || creditsError?.message || String(creditsError)}`,
+            }
+          });
+        } catch (dbErr) {
+          console.error("Failed to log credit error to database:", dbErr);
+        }
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
           message: "You have reached your usage limit",
