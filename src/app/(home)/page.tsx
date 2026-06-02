@@ -13,9 +13,10 @@ import { CTASection } from "@/modules/home/ui/components/cta-section";
 import ProcessShowcase from "@/modules/home/ui/components/process-showcase";
 import { ComparisonTable } from "@/modules/home/ui/components/comparison-table";
 import { CinematicBackground } from "@/modules/home/ui/components/cinematic-background";
+import { HlsVideoBackground } from "@/modules/home/ui/components/HlsVideoBackground";
 
 const Page = () => {
-  const { isSignedIn, isLoaded } = useUser();
+  const { isSignedIn, isLoaded, user } = useUser();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -39,58 +40,112 @@ const Page = () => {
 
   return (
     <div className="flex flex-col w-full min-h-screen bg-black overflow-x-hidden selection:bg-blue-500/30">
-      <CinematicBackground />
+      {isSignedIn ? (
+        <HlsVideoBackground src="https://stream.mux.com/Aa02T7oM1wH5Mk5EEVDYhbZ1ChcdhRsS2m1NYyx4Ua1g.m3u8" />
+      ) : (
+        <CinematicBackground />
+      )}
 
       <section className="relative min-h-[60vh] px-4 md:px-8 flex flex-col items-center pt-8 pb-4 perspective-2000">
         {/* Top/Center Content Wrapper */}
         <div className="relative z-10 w-full max-w-4xl mx-auto text-center preserve-3d" style={{ paddingTop: '20px' }}>
           {/* Futuristic Badge */}
           <div className="flex flex-col items-center w-full gap-2 mb-3">
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 backdrop-blur-3xl shadow-xl mx-auto w-fit group hover:border-blue-500/50 transition-all duration-500"
-            >
-              <div className="size-1 rounded-full bg-blue-400 animate-pulse" />
-              <span className="text-[8px] font-black uppercase tracking-[0.4em] text-gray-500 group-hover:text-blue-400 transition-colors leading-none italic">
-                DEVX ENGINE ACTIVE
-              </span>
-            </motion.div>
+            {!isSignedIn ? (
+              <>
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 backdrop-blur-3xl shadow-xl mx-auto w-fit group hover:border-blue-500/50 transition-all duration-500"
+                >
+                  <div className="size-1 rounded-full bg-blue-400 animate-pulse" />
+                  <span className="text-[8px] font-black uppercase tracking-[0.4em] text-gray-500 group-hover:text-blue-400 transition-colors leading-none italic">
+                    DEVX ENGINE ACTIVE
+                  </span>
+                </motion.div>
 
-            <motion.h1
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="text-2xl md:text-4xl lg:text-5xl font-black text-white tracking-tighter leading-[1.1] flex flex-col items-center gap-0 mb-4 uppercase italic text-center"
-            >
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-cyan-400 to-emerald-400 animate-gradient-x bg-size-[200%_auto] text-glow px-4">
-                AI-powered Next.js starter pack
-              </span>
-              <span className="text-white brightness-125 drop-shadow-[0_0_15px_rgba(255,255,255,0.2)] px-4">
-                Built for developers
-              </span>
-            </motion.h1>
+                <motion.h1
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="text-2xl md:text-4xl lg:text-5xl font-black text-white tracking-tighter leading-[1.1] flex flex-col items-center gap-0 mb-4 uppercase italic text-center"
+                >
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-cyan-400 to-emerald-400 animate-gradient-x bg-size-[200%_auto] text-glow px-4">
+                    AI-powered Next.js starter pack
+                  </span>
+                  <span className="text-white brightness-125 drop-shadow-[0_0_15px_rgba(255,255,255,0.2)] px-4">
+                    Built for developers
+                  </span>
+                </motion.h1>
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-              className="space-y-3"
-            >
-              <p className="text-xs md:text-sm text-gray-500 font-medium tracking-tight max-w-2xl mx-auto leading-relaxed italic text-center">
-                The <span className="text-white">DevX App Engine</span> Generate production-ready app structure in <span className="text-blue-400">minutes</span>. <br className="hidden md:block" />
-                Routes,<span className="text-emerald-400">API scaffolding, and opinionated architecture</span> instantly.
-              </p>
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="space-y-3"
+                >
+                  <p className="text-xs md:text-sm text-gray-500 font-medium tracking-tight max-w-2xl mx-auto leading-relaxed italic text-center">
+                    The <span className="text-white">DevX App Engine</span> Generate production-ready app structure in <span className="text-blue-400">minutes</span>. <br className="hidden md:block" />
+                    Routes,<span className="text-emerald-400">API scaffolding, and opinionated architecture</span> instantly.
+                  </p>
 
-              <div className="flex flex-wrap justify-center gap-2 text-[8px] font-black uppercase tracking-[0.2em] italic">
-                <span className="px-3 py-1 rounded-md bg-white/5 border border-white/10 text-blue-400">Next.js 15</span>
-                <span className="px-3 py-1 rounded-md bg-white/5 border border-white/10 text-purple-400">Clerk + Prisma</span>
-                <span className="px-3 py-1 rounded-md bg-white/5 border border-white/10 text-emerald-400">tRPC Stack</span>
+                  <div className="flex flex-wrap justify-center gap-2 text-[8px] font-black uppercase tracking-[0.2em] italic">
+                    <span className="px-3 py-1 rounded-md bg-white/5 border border-white/10 text-blue-400">Next.js 15</span>
+                    <span className="px-3 py-1 rounded-md bg-white/5 border border-white/10 text-purple-400">Clerk + Prisma</span>
+                    <span className="px-3 py-1 rounded-md bg-white/5 border border-white/10 text-emerald-400">tRPC Stack</span>
+                  </div>
+                </motion.div>
+              </>
+            ) : (
+              <div className="w-full flex flex-col items-center justify-center gap-4 pt-2 pb-6 relative">
+                {/* Ambient background glow for SaaS premium feel */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[100px] bg-blue-500/20 blur-[100px] rounded-full pointer-events-none" />
+
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.7, ease: "easeOut" }}
+                  className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-[#1A1A1A]/80 border border-white/[0.08] backdrop-blur-xl shadow-[0_4px_24px_rgba(0,0,0,0.4)] mb-4 relative z-10"
+                >
+                  {/* Pulsing indicator */}
+                  <div className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]"></span>
+                  </div>
+                  <span className="text-[11px] font-semibold text-white/60 tracking-wider uppercase">
+                    Welcome back, <span className="text-white/90">{user?.firstName || 'Developer'}</span>
+                  </span>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.7, delay: 0.15, ease: "easeOut" }}
+                  className="text-center w-full max-w-3xl mx-auto relative z-10"
+                >
+                  <h1 className="text-4xl md:text-5xl lg:text-7xl font-sans font-light text-transparent bg-clip-text bg-gradient-to-b from-white via-white/80 to-white/30 tracking-tight leading-tight pb-2">
+                    Turn Ideas Into{" "}
+                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400 animate-gradient-x bg-size-[200%_auto] pb-2 font-normal">
+                      Reality.
+                    </span>
+                  </h1>
+                  <p className="text-gray-400/80 text-sm md:text-base font-sans font-light tracking-[0.15em] uppercase mt-4">
+                    Simple text <span className="mx-3 text-indigo-400/50 font-light">→</span> Full app
+                  </p>
+                </motion.div>
+                
+                {/* Elegant subtle divider */}
+                <motion.div
+                  initial={{ opacity: 0, scaleX: 0 }}
+                  animate={{ opacity: 1, scaleX: 1 }}
+                  transition={{ duration: 1, delay: 0.4 }}
+                  className="h-[1px] w-32 bg-gradient-to-r from-transparent via-white/20 to-transparent mt-2 relative z-10"
+                />
               </div>
-            </motion.div>
+            )}
           </div>
 
           {/* Prompt Entry System */}
-          <div className="w-full flex justify-center mt-4 relative">
+          <div className="w-full flex justify-center mt-0 relative">
             <div className="absolute inset-0 bg-blue-500/5 blur-[100px] rounded-full pointer-events-none" />
             <div className="flex flex-col items-center w-full max-w-4xl relative z-10">
               <ProjectForm />

@@ -13,6 +13,10 @@ export class DeploymentManager extends EventEmitter {
   constructor(hooks?: DeploymentHookOptions) {
     super();
     this.hooks = hooks || {};
+    // Prevent process crashes on "error" emissions when no external listeners are attached
+    this.on("error", (deployment, error) => {
+      console.warn(`[DeploymentManager] Emitted error event: ${error} for deployment ${deployment?.id}`);
+    });
   }
 
   async deploy(

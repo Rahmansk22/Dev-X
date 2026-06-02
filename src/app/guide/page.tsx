@@ -80,7 +80,7 @@ const StepVisualizer = ({ step, Icon }: { step: string; Icon: any }) => {
 	if (step === "01") {
 		return (
 			<div className="w-full h-full flex flex-col justify-center p-8 font-mono text-[11px] leading-relaxed relative z-10">
-				<div className="text-gray-500 mb-4">// LLM Architectural Output</div>
+				<div className="text-gray-500 mb-4">{"// LLM Architectural Output"}</div>
 				<div className="text-blue-400">{`{`}</div>
 				<div className="pl-4"><span className="text-blue-300">"intent"</span><span className="text-gray-400">: </span><span className="text-yellow-300">"SaaS Dashboard"</span>,</div>
 				<div className="pl-4"><span className="text-blue-300">"stack"</span><span className="text-gray-400">: </span><span className="text-blue-400">{`{`}</span></div>

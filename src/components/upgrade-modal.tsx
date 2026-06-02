@@ -14,7 +14,7 @@ interface UpgradeModalProps {
 }
 
 const FEATURE_HIGHLIGHTS = [
-  { icon: <Crown className="size-4 text-amber-400" />, text: "Access to Claude 3 & GPT-4o" },
+  { icon: <Crown className="size-4 text-amber-400" />, text: "Access to DevX Max & Ultimate Engines" },
   { icon: <Sparkles className="size-4 text-blue-400" />, text: "Unlimited Code Generation" },
   { icon: <Zap className="size-4 text-purple-400" />, text: "Priority Multi-Agent Orchestration" },
   { icon: <ShieldCheck className="size-4 text-emerald-400" />, text: "Private Project Deployment" },

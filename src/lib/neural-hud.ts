@@ -20,27 +20,37 @@ export function buildEmergencyPreviewHtml(payload: EmergencyPreviewPayload): str
   };
 
   const fileItems = safePayload.files
-    .map((file) => `<div class="px-3 py-2 bg-violet-500/5 border border-violet-500/10 text-[10px] font-mono text-violet-300/70 truncate tracking-tight flex items-center gap-2 rounded">
-      <svg class="size-3 text-violet-400/40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
-      ${escapeHtml(file)}
-    </div>`)
+    .map((file) => {
+      return (
+        '<div class="px-3 py-2 bg-violet-500/5 border border-violet-500/10 text-[10px] font-mono text-violet-300/70 truncate tracking-tight flex items-center gap-2 rounded">' +
+        '<svg class="size-3 text-violet-400/40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>' +
+        escapeHtml(file) +
+        "</div>"
+      );
+    })
     .join("");
 
   const logBlocks = safePayload.logs
-    .map(
-      (log, index) =>
-        `<div class="bg-black/60 border border-white/5 rounded-xl overflow-hidden relative group mb-6 shadow-2xl">
-          <div class="flex items-center justify-between px-5 py-3 bg-white/5 border-b border-white/10">
-            <div class="text-[10px] font-bold text-violet-400 uppercase tracking-[0.2em]">TRACE_STREAM_0${index + 1}</div>
-            <div class="flex gap-2">
-               <div class="size-2 rounded-full bg-red-500/30"></div>
-               <div class="size-2 rounded-full bg-amber-500/30"></div>
-               <div class="size-2 rounded-full bg-emerald-500/30"></div>
-            </div>
-          </div>
-          <pre class="p-6 text-[12px] leading-relaxed font-mono text-violet-100/90 whitespace-pre-wrap break-all custom-scrollbar overflow-y-auto max-h-[60vh]">${escapeHtml(log)}</pre>
-        </div>`
-    )
+    .map((log, index) => {
+      const traceStreamName = "TRACE_STREAM_0" + (index + 1);
+      return (
+        '<div class="bg-black/60 border border-white/5 rounded-xl overflow-hidden relative group mb-6 shadow-2xl">' +
+        '<div class="flex items-center justify-between px-5 py-3 bg-white/5 border-b border-white/10">' +
+        '<div class="text-[10px] font-bold text-violet-400 uppercase tracking-[0.2em]">' +
+        traceStreamName +
+        "</div>" +
+        '<div class="flex gap-2">' +
+        '<div class="size-2 rounded-full bg-red-500/30"></div>' +
+        '<div class="size-2 rounded-full bg-amber-500/30"></div>' +
+        '<div class="size-2 rounded-full bg-emerald-500/30"></div>' +
+        "</div>" +
+        "</div>" +
+        '<pre class="p-6 text-[12px] leading-relaxed font-mono text-violet-100/90 whitespace-pre-wrap break-all custom-scrollbar overflow-y-auto max-h-[60vh]">' +
+        escapeHtml(log) +
+        "</pre>" +
+        "</div>"
+      );
+    })
     .join("");
 
   return `

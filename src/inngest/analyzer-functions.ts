@@ -64,6 +64,14 @@ export const analyzeRequestFunction = inngest.createFunction(
 
     // Create message with analysis
     const message = await step.run("save-analysis", async () => {
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+      });
+      if (!project) {
+        console.warn(`[analyzeRequestFunction] Project ${projectId} not found. Returning early.`);
+        return null;
+      }
+
       const msg = await prisma.message.create({
         data: {
           projectId,
@@ -75,6 +83,13 @@ export const analyzeRequestFunction = inngest.createFunction(
       console.log("[analyzeRequestFunction] Message saved:", msg.id);
       return msg;
     });
+
+    if (!message) {
+      return {
+        skipped: true,
+        reason: "Project not found",
+      };
+    }
 
     // 🔥 CHAIN REACTION: Decide if we go to questions or straight to coding
     if (analysis.needsQuestions) {
@@ -187,6 +202,14 @@ export const generateQuestionsFunction = inngest.createFunction(
 
     // Save questions as QUESTION message
     const questionMessage = await step.run("save-questions", async () => {
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+      });
+      if (!project) {
+        console.warn(`[generateQuestionsFunction] Project ${projectId} not found. Returning early.`);
+        return null;
+      }
+
       const msg = await prisma.message.create({
         data: {
           projectId,
@@ -198,6 +221,13 @@ export const generateQuestionsFunction = inngest.createFunction(
       console.log("[generateQuestionsFunction] Questions saved:", msg.id);
       return msg;
     });
+
+    if (!questionMessage) {
+      return {
+        skipped: true,
+        reason: "Project not found",
+      };
+    }
 
     return {
       messageId: questionMessage.id,
@@ -283,6 +313,14 @@ Previous requirements mentioned: ${previousMessages
 
     // Save context as ANALYSIS message
     const contextMessage = await step.run("save-context", async () => {
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+      });
+      if (!project) {
+        console.warn(`[buildContextFunction] Project ${projectId} not found. Returning early.`);
+        return null;
+      }
+
       const msg = await prisma.message.create({
         data: {
           projectId,
@@ -294,6 +332,13 @@ Previous requirements mentioned: ${previousMessages
       console.log("[buildContextFunction] Context saved:", msg.id);
       return msg;
     });
+
+    if (!contextMessage) {
+      return {
+        skipped: true,
+        reason: "Project not found",
+      };
+    }
 
     // 🔥 THE MISSING LINK: Trigger the Code Agent to start generating files based on this context
     const projectBusy = await step.run("check-project-busy-before-context-generate", async () => {
@@ -352,6 +397,12 @@ export const smartRouterFunction = inngest.createFunction(
 
     // 🚀 ULTRA-FAST ROUTING: Minimal steps, maximum speed
     const project = await step.run("get-project-and-lock", async () => {
+      const exists = await prisma.project.findUnique({
+        where: { id: projectId },
+      });
+      if (!exists) {
+        return null;
+      }
       // Consolidate busy check + lock in one DB call
       const p = await prisma.project.update({
         where: { id: projectId },
@@ -360,6 +411,11 @@ export const smartRouterFunction = inngest.createFunction(
       });
       return p;
     });
+
+    if (!project) {
+      console.warn(`[smartRouterFunction] Project ${projectId} not found. Returning early.`);
+      return { mode: "turbo", status: "skipped_missing" };
+    }
 
     if (project.activeRunId && project.activeRunId !== `queued:${event.id}`) {
        console.log(`[smartRouterFunction] ⏭️ Skipping trigger because project ${projectId} is busy with ${project.activeRunId}`);

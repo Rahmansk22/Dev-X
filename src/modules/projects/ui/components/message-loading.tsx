@@ -16,9 +16,9 @@ export const MessageLoading = () => {
         {/* Identity header */}
         <div className="flex items-center justify-between w-full pr-4">
           <div className="flex items-center gap-3">
-            <div className="size-8 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center p-1.5 relative">
-              <CpuIcon size={16} className="text-blue-400" />
-              <div className="absolute -top-0.5 -right-0.5 size-2 bg-blue-500 rounded-full border-2 border-black animate-pulse" />
+            <div className="size-8 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 border border-blue-500/30 flex items-center justify-center p-1.5 relative shadow-[0_0_15px_rgba(59,130,246,0.2)]">
+              <img src="/logo.svg" className="size-full object-contain" alt="DevX Engine" />
+              <div className="absolute -top-0.5 -right-0.5 size-2 bg-blue-400 rounded-full border-2 border-black animate-ping" />
             </div>
             <div className="flex flex-col">
               <span className="text-[11px] font-black text-white uppercase tracking-widest leading-none">DEV-X ENGINE</span>

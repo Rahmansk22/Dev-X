@@ -2,7 +2,12 @@
 // Senior-level, production-grade self-healing agent for SaaS build/deploy error recovery
 
 import { EventEmitter } from "events";
-import { spawn } from "child_process";
+import prisma from "@/lib/db";
+import { Sandbox } from "e2b";
+import { runInstallAndBuild } from "@/lib/build-executor";
+import { deployApp } from "@/deployment/integration";
+
+const activeDeployHeals = new Set<string>();
 
 export type BuildEvent = {
   type: "build" | "deploy";
@@ -38,39 +43,70 @@ export class SelfHealingAgent extends EventEmitter {
   }
 
   async autoFix(event: BuildEvent): Promise<string> {
-    // Example: Retry build/deploy, clean cache, or apply known fixes
-    // This is a placeholder for extensible auto-fix logic
     if (event.type === "build") {
-      // Retry build (simulate with a shell command)
-      return await this.runCommand(`npm run build --workspace=${event.appId}`);
+      const project = await prisma.project.findUnique({
+        where: { id: event.appId },
+        select: { id: true, sandboxId: true },
+      });
+
+      if (!project?.sandboxId) {
+        return `Project ${event.appId} has no sandbox attached. Cannot self-heal build.`;
+      }
+
+      try {
+        console.log(`[Self-Healing] Connecting to E2B sandbox ${project.sandboxId} for app ${event.appId}...`);
+        const sandbox = await Sandbox.connect(project.sandboxId);
+        const buildResult = await runInstallAndBuild(sandbox, event.appId);
+        const installExit = buildResult.install.exitCode ?? 1;
+        const buildExit = buildResult.build.exitCode ?? 1;
+
+        if (installExit !== 0 || buildExit !== 0) {
+          return `Build failed in E2B sandbox for project ${event.appId}. Install exit=${installExit}, Build exit=${buildExit}`;
+        }
+        return `Build succeeded in E2B sandbox for project ${event.appId}.`;
+      } catch (err: any) {
+        console.error(`[Self-Healing] Sandbox build error:`, err);
+        return `Failed to connect or build in E2B sandbox: ${err.message}`;
+      }
     } else if (event.type === "deploy") {
-      // Retry deploy (simulate with a shell command)
-      return await this.runCommand(`npm run deploy --workspace=${event.appId}`);
+      const token = process.env.VERCEL_TOKEN;
+      if (!token) {
+        return `VERCEL_TOKEN is required for self-healing deployment workflow`;
+      }
+
+      if (activeDeployHeals.has(event.appId)) {
+        return `Already attempting a self-healing deployment for project ${event.appId}. Aborting recursion loop.`;
+      }
+
+      activeDeployHeals.add(event.appId);
+
+      try {
+        console.log(`[Self-Healing] Redeploying app ${event.appId} via Vercel REST API...`);
+        const deployment = await deployApp(
+          event.appId,
+          event.userId,
+          `deploy_heal_${Date.now()}`,
+          {
+            provider: "vercel",
+            projectId: event.appId,
+            apiKey: token,
+          },
+          process.cwd(),
+          event.appId
+        );
+
+        if (deployment.result.status !== "success") {
+          return `Deployment failed during self-healing: ${deployment.result.error}`;
+        }
+        return `Deployment succeeded during self-healing: ${deployment.result.url}`;
+      } catch (err: any) {
+        console.error(`[Self-Healing] Sandbox deploy error:`, err);
+        return `Failed to deploy in self-healing: ${err.message}`;
+      } finally {
+        activeDeployHeals.delete(event.appId);
+      }
     }
     return "No auto-fix applied.";
   }
-
-  private runCommand(cmd: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(cmd, { shell: true });
-      let output = "";
-      child.stdout.on("data", (data) => (output += data.toString()));
-      child.stderr.on("data", (data) => (output += data.toString()));
-      child.on("close", (code) => {
-        if (code === 0) resolve(output);
-        else reject(output);
-      });
-    });
-  }
 }
 
-// Usage example (to be integrated with your build/deploy pipeline):
-// const agent = new SelfHealingAgent({
-//   onError: async (event) => {
-//     // Log error, notify user, etc.
-//   },
-//   onAutoFix: async (event, fixResult) => {
-//     // Log fix attempt, notify user, etc.
-//   },
-// });
-// agent.monitor(buildEvent);

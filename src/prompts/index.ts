@@ -8,6 +8,7 @@ export { TOOL_VALIDATION_PROMPT } from './tool-validation';
 export { CODE_QUALITY_PROMPT } from './code-quality';
 export { CODE_GENERATION_GUARD } from './code-generation-guard';
 export { PROMPT_ARCHITECTURE } from './prompt-architecture';
+export { PREMIUM_UI_PROMPT } from './premium-ui';
 
 /**
  * QUICK REFERENCE - What each prompt does
@@ -47,6 +48,13 @@ export const PROMPT_REFERENCE = {
     purpose: 'Integration guide - how all prompts work together in 3-layer defense',
     when: 'Read first to understand the system',
     scope: 'System overview and workflow'
+  },
+  
+  PREMIUM_UI_PROMPT: {
+    file: 'premium-ui.ts',
+    purpose: 'Master-level frontend design, Framer Motion parity, Micro-interactions',
+    when: 'Use when generating components to achieve top-tier SaaS look',
+    scope: 'Aesthetics and animation engine'
   }
 };
 

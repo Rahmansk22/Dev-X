@@ -112,7 +112,7 @@ export function UserControl({ showName }: Props) {
             <div className="flex flex-col">
               <span className="text-[11px] font-black uppercase tracking-widest">Billing & Plan</span>
               <span className="text-[8px] text-gray-600 uppercase font-black tracking-tighter">
-                {hasProAccess ? "Pro Level Active" : "Upgrade with Clerk Billing"}
+                {hasProAccess ? "Pro Level Active" : "Upgrade Plan"}
               </span>
             </div>
           </DropdownMenuItem>

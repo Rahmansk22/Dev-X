@@ -60,7 +60,15 @@ export const DEVX_OPTIONAL_FILE_RULES = [
 export function canonicalizeDevxGeneratedPath(path: string): string {
   let cleanPath = path.replace(/\\/g, "/").trim();
   cleanPath = cleanPath.replace(/^\.\//, "").replace(/^\/+/, "");
-  cleanPath = cleanPath.replace(/^(app|components|lib|src)\/\1\//, "$1/");
+  // Strip absolute sandbox paths the AI sometimes hallucinates
+  cleanPath = cleanPath.replace(/^home\/user\/app\//, "");
+  // Loop: keep stripping duplicated directory prefixes until stable
+  // Catches app/app/page.tsx, app/app/app/page.tsx, components/components/Button.tsx, etc.
+  let prev = "";
+  while (prev !== cleanPath) {
+    prev = cleanPath;
+    cleanPath = cleanPath.replace(/^(app|components|lib|src)\/\1\//, "$1/");
+  }
   cleanPath = cleanPath.replace(/^src\//, "");
   return cleanPath;
 }

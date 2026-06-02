@@ -29,6 +29,7 @@ import { getCurrentUserId } from '@/lib/auth';
 import SandboxLifecycleManager, { SandboxState } from '@/lib/sandbox-lifecycle-manager';
 import { withProjectRecoveryLock, isProjectRecoveryLocked } from '@/lib/project-recovery-lock';
 import {
+  CANONICAL_NEXT_CONFIG_TS,
   createSandboxWithTemplateFallback,
   DEFAULT_E2B_TEMPLATE,
   ensurePreviewDependencies,
@@ -549,17 +550,7 @@ export async function POST(
     const configKeys = Object.keys(files).filter(f => /^next\.config\.(ts|mjs|js)$/.test(f));
     if (configKeys.length === 0) {
       log('📄 Creating next.config.ts...');
-      const nextConfig = `import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  typescript: { ignoreBuildErrors: true },
-  eslint: { ignoreDuringBuilds: true },
-  reactStrictMode: false,
-};
-
-export default nextConfig;`;
-      
-      await sandbox.files.write(`${homeDir}/next.config.ts`, nextConfig);
+      await sandbox.files.write(`${homeDir}/next.config.ts`, CANONICAL_NEXT_CONFIG_TS);
       log('✅ next.config.ts created');
     } else if (configKeys.length > 1) {
       // Dedup: keep preferred format

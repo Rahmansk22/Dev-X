@@ -51,13 +51,25 @@ const nextConfig: NextConfig = {
       "@tanstack/react-query",
       "@trpc/client",
       "@trpc/react-query",
+      "framer-motion",
+      "motion",
+      "react-icons",
+      "gsap",
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-dropdown-menu",
+      "@radix-ui/react-select",
+      "@radix-ui/react-tabs",
+      "@radix-ui/react-tooltip",
+      "sonner",
+      "react-hot-toast",
     ],
   },
 
   webpack: (config, { dev }) => {
     if (dev) {
-      // Prevent PackFileCacheStrategy ArrayBuffer crashes under heavy local recompilation.
-      config.cache = false;
+      config.cache = {
+        type: "filesystem",
+      };
       config.parallelism = 20;
     }
     return config;

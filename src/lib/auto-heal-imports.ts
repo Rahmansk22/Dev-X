@@ -426,6 +426,116 @@ export function autoHealAllFiles(files: Record<string, string>): Record<string, 
     console.log(`[cross-file-heal] 🔗 Fixed ${crossFileFixes} import/export mismatches`);
   }
 
+  // ── Default/Named Import-Export Reconciliation ──
+  // The #1 cause of "Element type is invalid: got undefined" runtime errors in big apps.
+  // When AI generates 10-20+ component files, it inconsistently mixes default vs named exports:
+  //   page.tsx:    import Navbar from "@/components/Navbar"     (default import)
+  //   Navbar.tsx:  export function Navbar() { ... }             (named export, NO default)
+  // → Navbar is undefined at runtime → crash.
+  // This phase detects and fixes the mismatch BEFORE files reach the sandbox.
+  let defaultImportFixes = 0;
+  for (const [filePath, content] of Object.entries(healed)) {
+    if (!/\.(tsx?|jsx?)$/.test(filePath)) continue;
+
+    // Find all default imports from @/ paths:
+    //   import Navbar from "@/components/Navbar"
+    //   import Hero from "@/components/Hero"
+    // But NOT: import React from "react" (no @/ prefix)
+    // But NOT: import { Button } from "@/components/ui/button" (named import)
+    const defaultImportRegex = /import\s+([A-Z][A-Za-z0-9_$]*)\s+from\s*['"]@\/([^'"]+)['"]/g;
+    let dimMatch;
+    let fixedContent = healed[filePath]; // use healed version (may have been modified by cross-file step)
+
+    while ((dimMatch = defaultImportRegex.exec(content)) !== null) {
+      const importedName = dimMatch[1]; // e.g. "Navbar"
+      const importPath = dimMatch[2];   // e.g. "components/Navbar"
+
+      // Resolve the target file
+      const candidates = [
+        importPath + ".ts",
+        importPath + ".tsx",
+        importPath + "/index.ts",
+        importPath + "/index.tsx",
+        importPath,
+      ];
+
+      let targetFilePath: string | undefined;
+      let targetContent: string | undefined;
+      for (const candidate of candidates) {
+        if (healed[candidate]) {
+          targetFilePath = candidate;
+          targetContent = healed[candidate];
+          break;
+        }
+        if (healed["app/" + candidate]) {
+          targetFilePath = "app/" + candidate;
+          targetContent = healed["app/" + candidate];
+          break;
+        }
+      }
+
+      if (!targetContent || !targetFilePath) continue; // Target not in this batch
+
+      // Check if target has a default export
+      const hasDefaultExport = /export\s+default\s+/.test(targetContent);
+
+      if (hasDefaultExport) continue; // ✅ Default import matches default export — all good
+
+      // ❌ MISMATCH: default import but target has NO default export
+      // Check if the target has a named export matching the imported name
+      const hasMatchingNamedExport = new RegExp(
+        `export\\s+(?:const|function|class|async\\s+function)\\s+${importedName}\\b`
+      ).test(targetContent);
+
+      if (hasMatchingNamedExport) {
+        // Strategy A: Rewrite the import from default to named
+        // import Navbar from "@/..." → import { Navbar } from "@/..."
+        const oldImport = dimMatch[0]; // full match: import Navbar from "@/components/Navbar"
+        const newImport = `import { ${importedName} } from "@/${importPath}"`;
+        fixedContent = fixedContent.replace(oldImport, newImport);
+        console.log(`[default-import-heal] 🔗 ${filePath}: ${importedName} — rewrote default import to named (target has named export)`);
+        defaultImportFixes++;
+      } else {
+        // Strategy B: Target has a function/const with this name but doesn't export it,
+        // OR target has an export default with a different name.
+        // Check if there's a matching function/const (not exported default)
+        const hasLocalDef = new RegExp(
+          `(?:function|const|class)\\s+${importedName}\\b`
+        ).test(targetContent);
+
+        if (hasLocalDef) {
+          // Add "export default <name>;" at the end of the target file
+          healed[targetFilePath] = targetContent.trimEnd() + `\n\nexport default ${importedName};\n`;
+          console.log(`[default-import-heal] 🔗 ${targetFilePath}: added "export default ${importedName}" to match default import in ${filePath}`);
+          defaultImportFixes++;
+        } else {
+          // Last resort: check if target exports anything we can alias
+          // e.g. target exports "export function NavBar()" (case difference)
+          const anyExportMatch = targetContent.match(
+            /export\s+(?:const|function|class|async\s+function)\s+([A-Z][A-Za-z0-9_$]*)/
+          );
+          if (anyExportMatch) {
+            const actualExportName = anyExportMatch[1];
+            // Rewrite import to use the actual name
+            const oldImport = dimMatch[0];
+            const newImport = `import { ${actualExportName} as ${importedName} } from "@/${importPath}"`;
+            fixedContent = fixedContent.replace(oldImport, newImport);
+            console.log(`[default-import-heal] 🔗 ${filePath}: ${importedName} — aliased to ${actualExportName} (no default export, no exact match)`);
+            defaultImportFixes++;
+          }
+        }
+      }
+    }
+
+    if (fixedContent !== healed[filePath]) {
+      healed[filePath] = fixedContent;
+    }
+  }
+
+  if (defaultImportFixes > 0) {
+    console.log(`[default-import-heal] 🔗 Fixed ${defaultImportFixes} default/named import-export mismatches`);
+  }
+
   return healed;
 }
 

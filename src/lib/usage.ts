@@ -13,8 +13,15 @@ const GENERATION_COST = 1;
 
 export async function getUsageTracker() {
 
-  const { has } = await auth();
-  const hasPremiumAccess = has({ plan: "pro"})
+  const { userId } = await auth();
+  let hasPremiumAccess = false;
+
+  if (userId) {
+    const subscription = await prisma.userSubscription.findUnique({
+      where: { userId },
+    });
+    hasPremiumAccess = subscription?.status === "active";
+  }
 
   const usageTracker = new RateLimiterPrisma({
     storeClient: prisma,

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { SignedIn, SignedOut, SignInButton } from "@clerk/nextjs";
 import { Navbar } from "@/modules/home/ui/components/navbar";
 import { motion, useMotionTemplate, useScroll, useTransform, useMotionValue } from "framer-motion";
@@ -74,164 +74,156 @@ const PLANS = [
 function PlanCard({
   plan,
   index,
+  onUpgrade,
+  loadingPlan
 }: {
   plan: typeof PLANS[number];
   index: number;
+  onUpgrade: (planId: string) => void;
+  loadingPlan: string | null;
 }) {
   const isPopular = plan.highlight;
-  const mouseX = useMotionValue(0.5);
-  const mouseY = useMotionValue(0.5);
-
-  function handleMouseMove({ currentTarget, clientX, clientY }: React.MouseEvent) {
-    const { left, top, width, height } = currentTarget.getBoundingClientRect();
-    const x = (clientX - left) / width;
-    const y = (clientY - top) / height;
-    mouseX.set(x);
-    mouseY.set(y);
-  }
-
-  const rotateX = useTransform(mouseY, [0, 1], [15, -15]);
-  const rotateY = useTransform(mouseX, [0, 1], [-15, 15]);
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.5, delay: index * 0.1 }}
-      className="relative perspective-[1500px]"
+      initial={{ opacity: 0, scale: 0.95, y: 20 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: index * 0.1, ease: "easeOut" }}
+      className="relative flex flex-col h-full"
     >
-      <motion.div
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => { mouseX.set(0.5); mouseY.set(0.5); }}
-        style={{
-          rotateX,
-          rotateY,
-          transformStyle: "preserve-3d",
-        }}
+      <div
         className={cn(
-          "relative h-[750px] w-full rounded-[2.5rem] border p-7 transition-all duration-300 ease-out backdrop-blur-2xl overflow-hidden group",
+          "relative flex-1 flex flex-col rounded-[2rem] border p-8 transition-colors duration-300 ease-in-out backdrop-blur-xl",
           isPopular 
-            ? "border-purple-500/50 bg-linear-to-b from-purple-500/10 to-zinc-950 shadow-[0_40px_100px_rgba(168,85,247,0.15)] ring-1 ring-white/10"
-            : "border-white/10 bg-white/[0.02] hover:bg-white/[0.04] shadow-2xl"
+            ? "border-indigo-500/50 bg-indigo-500/[0.03] shadow-[0_0_40px_rgba(99,102,241,0.1)] hover:border-indigo-500/70"
+            : "border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.03]"
         )}
       >
-        {/* Ambient Glow */}
-        <div className={cn("absolute -top-24 -right-24 size-64 blur-[100px] pointer-events-none opacity-20", plan.glow)} />
+        {/* Ambient Glow for Popular */}
+        {isPopular && (
+          <div className="absolute top-0 right-0 -mr-4 -mt-4 h-32 w-32 rounded-full bg-indigo-500/20 blur-3xl pointer-events-none" />
+        )}
         
         {isPopular && (
-          <div className="absolute top-6 right-6 transform-[translateZ(50px)]">
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/20 border border-purple-500/30 text-[9px] font-black text-purple-400 uppercase tracking-widest shadow-lg">
+          <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
+            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500 border border-indigo-400 text-[10px] font-bold text-white uppercase tracking-widest shadow-lg shadow-indigo-500/30">
               <Crown className="size-3" />
-              <span>Recommended</span>
-            </div>
+              Most Popular
+            </span>
           </div>
         )}
 
         {/* Plan Header */}
-        <div className="mb-6 transform-[translateZ(60px)]">
-          <div className="size-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center mb-4 shadow-inner ring-1 ring-white/5">
-            {plan.icon}
-          </div>
-          <h3 className="text-2xl font-black text-white tracking-tighter uppercase italic leading-none mb-2">{plan.name}</h3>
-          <p className="text-[11px] font-medium text-gray-500 leading-snug line-clamp-2">{plan.description}</p>
+        <div className="mb-6 flex flex-col pt-2">
+          <h3 className="text-xl font-bold text-white tracking-tight leading-none mb-3">{plan.name}</h3>
+          <p className="text-sm font-medium text-zinc-400 leading-snug line-clamp-3">{plan.description}</p>
         </div>
 
         {/* Pricing */}
-        <div className="mb-6 transform-[translateZ(70px)]">
-          <div className="flex items-baseline gap-1">
-            <span className="text-5xl font-black text-white tracking-tighter drop-shadow-2xl">{plan.price}</span>
-            <span className="text-[10px] font-bold text-gray-600 uppercase tracking-widest">{plan.period}</span>
+        <div className="mb-8">
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-5xl font-bold text-white tracking-tighter">{plan.price}</span>
+            <span className="text-sm font-medium text-zinc-500">{plan.period}</span>
           </div>
         </div>
 
+        {/* CTA */}
+        <div className="mb-10 mt-auto">
+          <button 
+            onClick={() => onUpgrade(plan.id)}
+            disabled={loadingPlan === plan.id}
+            className={cn(
+              "w-full h-12 rounded-xl font-semibold text-sm transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-zinc-950 flex items-center justify-center gap-2",
+              isPopular 
+                ? "bg-white text-zinc-900 hover:bg-zinc-200 focus:ring-white/50 shadow-lg shadow-white/10" 
+                : "bg-white/10 text-white border border-white/10 hover:bg-white/15 focus:ring-white/30"
+            )}
+          >
+            {loadingPlan === plan.id ? (
+              <span className="animate-pulse">Processing...</span>
+            ) : (
+              <span>Upgrade to {plan.name}</span>
+            )}
+          </button>
+        </div>
+
         {/* Features list */}
-        <div className="space-y-4 transform-[translateZ(40px)] flex-1 pr-2">
-          <p className="text-[9px] font-black text-gray-600 uppercase tracking-[0.3em] mb-2">Architecture Suite</p>
-          <ul className="space-y-3">
+        <div className="flex-1 space-y-4">
+          <p className="text-xs font-semibold text-zinc-200">What's included</p>
+          <ul className="space-y-3.5">
             {plan.features.map((feature, i) => (
               <li key={i} className={cn(
-                "flex items-center gap-2.5 text-[10px] font-bold uppercase tracking-wide",
-                feature.included ? "text-gray-300" : "text-gray-700 decoration-gray-800 line-through"
+                "flex items-start gap-3 text-sm",
+                feature.included ? "text-zinc-300" : "text-zinc-600 line-through"
               )}>
                 <div className={cn(
-                  "size-4 rounded-full flex items-center justify-center shrink-0 border",
-                  feature.included ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" : "bg-white/5 border-white/10 text-gray-700"
+                  "size-5 rounded-full flex items-center justify-center shrink-0 mt-0.5",
+                  feature.included ? "bg-indigo-500/10 text-indigo-400" : "bg-white/5 text-zinc-700"
                 )}>
-                  {feature.included ? <Check className="size-2.5" /> : <X className="size-2" />}
+                  {feature.included ? <Check className="size-3" strokeWidth={3} /> : <X className="size-3" strokeWidth={3} />}
                 </div>
-                <span>{feature.text}</span>
+                <span className="leading-snug">{feature.text}</span>
               </li>
             ))}
           </ul>
         </div>
-
-        {/* CTA */}
-        <div className="mt-8 transform-[translateZ(80px)]">
-          <button 
-            disabled
-            className="w-full h-14 rounded-2xl font-black uppercase tracking-[0.2em] transition-all relative overflow-hidden bg-white/5 text-gray-500 border border-white/10 cursor-not-allowed"
-          >
-            <span className="relative z-10">Coming Soon</span>
-          </button>
-        </div>
-      </motion.div>
+      </div>
     </motion.div>
   );
 }
 
-class BillingErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { hasError: boolean }
-> {
-  constructor(props: { children: React.ReactNode }) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error: unknown) {
-    console.error("Pricing render failed:", error);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="mx-auto max-w-3xl rounded-3xl border border-amber-500/20 bg-amber-500/5 p-8 text-center shadow-xl backdrop-blur-sm">
-          <h2 className="text-2xl font-bold text-amber-400">Billing Configuration Required</h2>
-          <p className="mt-3 text-sm text-zinc-300">
-            Clerk Billing is currently disabled or unconfigured in this environment.
-          </p>
-          <div className="mt-6">
-            <a
-              href="https://dashboard.clerk.com/"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-zinc-900 transition hover:bg-amber-400"
-            >
-              Configure Clerk Dashboard
-            </a>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
 
 export default function PricingPage() {
   const router = useRouter();
-  const planIds = {
-    starter: process.env.NEXT_PUBLIC_CLERK_PLAN_STARTER ?? "",
-    growth: process.env.NEXT_PUBLIC_CLERK_PLAN_GROWTH ?? "",
-    scale: process.env.NEXT_PUBLIC_CLERK_PLAN_SCALE ?? "",
-    enterprise: process.env.NEXT_PUBLIC_CLERK_PLAN_ENTERPRISE ?? "",
-  };
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
 
   const { scrollYProgress } = useScroll();
   const y = useTransform(scrollYProgress, [0, 1], ["0%", "50%"]);
+
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    document.body.appendChild(script);
+  }, []);
+
+  const handleUpgrade = async (planId: string) => {
+    setLoadingPlan(planId);
+    try {
+      const response = await fetch("/api/razorpay/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planId }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.error);
+
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
+        amount: data.amount,
+        currency: data.currency,
+        name: "Dev X",
+        description: `Upgrade to ${planId}`,
+        order_id: data.orderId,
+        handler: function (response: any) {
+          alert("Payment Successful!");
+          router.refresh();
+        },
+        theme: {
+          color: "#8b5cf6",
+        },
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.open();
+    } catch (error) {
+      console.error(error);
+      alert("Failed to initialize payment.");
+    } finally {
+      setLoadingPlan(null);
+    }
+  };
 
   return (
     <div className="relative min-h-screen bg-zinc-950 text-white selection:bg-indigo-500/30 overflow-hidden">
@@ -303,33 +295,32 @@ export default function PricingPage() {
           </p>
         </motion.div>
 
-        {/* Removed SignedIn/SignedOut wrappers here to make the pricing grid visible to everyone */}
-        <BillingErrorBoundary>
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 max-w-6xl mx-auto">
-            {PLANS.map((plan, i) => (
-              <PlanCard
-                key={plan.id}
-                plan={plan as any}
-                index={i}
-              />
-            ))}
-          </div>
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 max-w-6xl mx-auto">
+          {PLANS.map((plan, i) => (
+            <PlanCard
+              key={plan.id}
+              plan={plan as any}
+              index={i}
+              onUpgrade={handleUpgrade}
+              loadingPlan={loadingPlan}
+            />
+          ))}
+        </div>
 
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 1 }}
-            className="mt-20 text-center flex flex-col items-center justify-center gap-4"
-          >
-            <div className="flex items-center justify-center gap-2">
-              <Shield className="h-5 w-5 text-zinc-500" />
-              <p className="text-sm font-medium text-zinc-400">Enterprise grade security. End-To-End Encrypted.</p>
-            </div>
-            <p className="text-xs text-zinc-600 max-w-md mx-auto">
-              Need a custom plan? Our architects can design a specific node cluster tailored to your compute and model requirements. Reach out to our synthesis team.
-            </p>
-          </motion.div>
-        </BillingErrorBoundary>
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1 }}
+          className="mt-20 text-center flex flex-col items-center justify-center gap-4"
+        >
+          <div className="flex items-center justify-center gap-2">
+            <Shield className="h-5 w-5 text-zinc-500" />
+            <p className="text-sm font-medium text-zinc-400">Enterprise grade security. End-To-End Encrypted.</p>
+          </div>
+          <p className="text-xs text-zinc-600 max-w-md mx-auto">
+            Need a custom plan? Our architects can design a specific node cluster tailored to your compute and model requirements. Reach out to our synthesis team.
+          </p>
+        </motion.div>
       </main>
     </div>
   );

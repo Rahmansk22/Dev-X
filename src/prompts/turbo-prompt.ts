@@ -48,6 +48,9 @@ Call the 'createOrUpdateFiles' tool with ALL files in a single call. NO prose, N
 
 ## DESIGN MANDATE
 - Premium, modern aesthetics — NEVER generic or plain
+- Massive inspiration from MotionSite, Skipper UI, Framer Motion UI, and famous top-tier web libraries.
+- Produce heavily scroll-animated (use framer-motion useScroll/useTransform), highly attractive UIs that feel extremely high-worth.
+- Use framer-motion for smooth hover effects, spring animations, and staggered list reveals.
 - Use curated HSL color palettes, not raw red/blue/green
 - Import a Google Font via next/font/google
 - Add framer-motion hover/enter transitions on interactive elements

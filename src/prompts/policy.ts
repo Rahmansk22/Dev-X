@@ -5,6 +5,8 @@
 export const POLICY_PROMPT = `
 ## DESIGN SYSTEM (Quick Reference)
 
+UI/UX INSPIRATION (MANDATORY): Massively draw inspiration from MotionSite, Skipper UI, Framer Motion UI, Aceternity UI, and top-tier browser component libraries. Create continuous scrolling, highly animated Framer Motion UIs that feel attractive, interactive, and premium ("high-worth"). Use Framer Motion extensively for scroll animations (useScroll, useTransform), hover effects, and staggering items.
+
 COLORS: Contextual (primary), Slate/Zinc (secondary), Emerald (success), Rose (danger), Amber (warning)
 TYPOGRAPHY: text-5xl (hero) → text-base (body) → text-xs (tiny) | font-bold/semibold/normal
 SPACING: 4px → 8px → 16px → 24px → 32px → 48px (p-1 → p-2 → p-4 → p-6 → p-8 → p-12)

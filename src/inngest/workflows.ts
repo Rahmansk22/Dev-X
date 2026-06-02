@@ -219,34 +219,10 @@ export default function RootLayout({
         );
       }
 
-      // Step 4: Build verified successfully
-
-      // Step 5: Deploy
-      const deployResult = await step.run('deploy-app', async () => {
-        return await deploymentManager.autoDetectAndDeploy(
-          projectPath,
-          `app-${projectId}`,
-        );
-      });
-
-      if (deployResult.success) {
-        // Step 6: Record deployment
-        await step.run('record-deployment', async () => {
-          return await recordDeployment({
-            projectId,
-            version: 1,
-            provider: 'auto-detected',
-            status: 'success',
-            deploymentUrl: deployResult.deploymentUrl,
-            duration: Math.round(deployResult.duration),
-          });
-        });
-      }
-
+      // Step 4: Build verified successfully (Deployment will be triggered manually when the user clicks the Deploy button in the SaaS UI)
       return {
         success: true,
         projectId,
-        deploymentUrl: deployResult.deploymentUrl,
       };
     } catch (error: any) {
       const errorMessage = error instanceof Error ? error.message : String(error);

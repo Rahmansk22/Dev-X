@@ -50,11 +50,53 @@ const formSchema = z.object({
     .max(5000, { message: "Message cannot be longer than 5000 characters" }),
 });
 
+const ModelLogo = ({ color, className = "size-7" }: { color: string; className?: string }) => {
+  const glowMap: Record<string, string> = {
+    cyan: "shadow-[0_0_8px_rgba(34,211,238,0.3)] border-cyan-500/20",
+    emerald: "shadow-[0_0_8px_rgba(52,211,153,0.3)] border-emerald-500/20",
+    purple: "shadow-[0_0_8px_rgba(192,132,252,0.3)] border-purple-500/20",
+    amber: "shadow-[0_0_12px_rgba(251,191,36,0.4)] border-amber-500/30 animate-pulse",
+    indigo: "shadow-[0_0_8px_rgba(129,140,248,0.3)] border-indigo-500/20",
+    rose: "shadow-[0_0_12px_rgba(251,113,133,0.4)] border-rose-500/30 animate-pulse",
+  };
+
+  const bgMap: Record<string, string> = {
+    cyan: "bg-cyan-500/5",
+    emerald: "bg-emerald-500/5",
+    purple: "bg-purple-500/5",
+    amber: "bg-amber-500/10",
+    indigo: "bg-indigo-500/5",
+    rose: "bg-rose-500/10",
+  };
+
+  const dotMap: Record<string, string> = {
+    cyan: "bg-cyan-400 shadow-[0_0_4px_rgba(34,211,238,0.6)]",
+    emerald: "bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.6)]",
+    purple: "bg-purple-400 shadow-[0_0_4px_rgba(192,132,252,0.6)]",
+    amber: "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.8)] animate-pulse",
+    indigo: "bg-indigo-400 shadow-[0_0_4px_rgba(129,140,248,0.6)]",
+    rose: "bg-rose-400 shadow-[0_0_6px_rgba(251,113,133,0.8)] animate-pulse",
+  };
+
+  return (
+    <div className={cn(
+      "relative flex items-center justify-center rounded-lg p-1 border transition-all duration-300",
+      glowMap[color] || "border-white/10",
+      bgMap[color] || "bg-white/5",
+      className
+    )}>
+      <img src="/logo.svg" className="size-full object-contain" alt="DevX Logo" />
+      <span className={cn("absolute -top-0.5 -right-0.5 size-1.5 rounded-full", dotMap[color] || "bg-blue-400")} />
+    </div>
+  );
+};
+
 type Model = {
   name: string;
   label: string;
-  icon: React.ReactNode | null;
   isPro: boolean;
+  description: string;
+  color: string;
 };
 
 export const ProjectForm = () => {
@@ -94,18 +136,19 @@ export const ProjectForm = () => {
 
   const [selectedModel, setSelectedModel] = useState<Model>({
     name: "grok",
-    label: "Grok 4.1 Fast",
-    icon: <XIcon className="size-4" />,
+    label: "DevX Basic",
     isPro: false,
+    description: "Lightning-fast prototyping & micro-fixes",
+    color: "cyan",
   });
 
   const models: Model[] = [
-    { name: "grok", label: "Grok 4.1 Fast", icon: <XIcon className="size-3" />, isPro: false },
-    { name: "geminiFlash", label: "Gemini 2.0 Flash", icon: <FcGoogle />, isPro: true },
-    { name: "gpt4o", label: "GPT-4o", icon: <SiOpenai className="text-[#7b61ff]" />, isPro: true },
-    { name: "claude37", label: "Claude 3.7 Sonnet", icon: <SiAnthropic className="text-[#fbbf24]" />, isPro: true },
-    { name: "deepseekR1", label: "DeepSeek R1", icon: <Brain className="text-[#10a37f]" />, isPro: true },
-    { name: "o1", label: "O1", icon: <SiOpenai className="text-[#000000]" />, isPro: true },
+    { name: "grok", label: "DevX Basic", isPro: false, description: "Lightning-fast prototyping & micro-fixes", color: "cyan" },
+    { name: "geminiFlash", label: "DevX Pro", isPro: true, description: "Rapid full-page additions & layout shifts", color: "emerald" },
+    { name: "gpt4o", label: "DevX Max", isPro: true, description: "High-fidelity CSS, animations & premium styling", color: "purple" },
+    { name: "claude37", label: "DevX Ultimate Coding Agent", isPro: true, description: "Complex state, interactive logic & fullstack features", color: "amber" },
+    { name: "deepseekR1", label: "DevX Reasoning", isPro: true, description: "Surgical multi-file bug ticket diagnosis & fixes", color: "indigo" },
+    { name: "o1", label: "DevX Ultimate Reasoning Expert", isPro: true, description: "Heavy algorithmic solutions & absolute logic", color: "rose" },
   ];
 
   type SubmitData = z.infer<typeof formSchema> & { model: "grok" | "geminiFlash" | "gpt4o" | "claude37" | "deepseekR1" | "o1" };
@@ -276,8 +319,8 @@ export const ProjectForm = () => {
                             className="group/btn flex items-center gap-2.5 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-blue-500/50 transition-all cursor-pointer shadow-xl backdrop-blur-2xl outline-none active:scale-95"
                           >
                             <div className="flex items-center gap-2">
-                              <div className="size-4 flex items-center justify-center opacity-70 group-hover/btn:opacity-100 transition-opacity">
-                                {selectedModel.name === "grok" ? <XIcon className="size-3" /> : selectedModel.icon || <Cpu className="size-3" />}
+                              <div className="opacity-70 group-hover/btn:opacity-100 transition-opacity">
+                                <ModelLogo color={selectedModel.color} className="size-6" />
                               </div>
                               <span className="text-[10px] font-black text-white uppercase tracking-[0.2em]">{selectedModel.label}</span>
                             </div>
@@ -315,12 +358,12 @@ export const ProjectForm = () => {
                                   )}
                                 >
                                   <div className="flex items-center gap-3">
-                                    <div className="size-8 rounded-xl bg-white/5 flex items-center justify-center border border-white/5">
-                                      {model.name === "grok" ? <XIcon className="size-4" /> : model.icon || <Cpu className="size-4" />}
-                                    </div>
+                                    <ModelLogo color={model.color} className="size-9 shrink-0" />
                                     <div className="text-left">
                                       <div className={cn("text-[11px] font-black uppercase tracking-tight", isSelected ? "text-blue-400" : "")}>{model.label}</div>
-                                      <div className="text-[9px] text-gray-700 font-bold tracking-widest">Architecture Optimized</div>
+                                      <div className="text-[10px] text-gray-400 font-medium tracking-normal mt-0.5 max-w-[200px] leading-tight">
+                                        {model.description}
+                                      </div>
                                     </div>
                                   </div>
                                   <div className="flex items-center gap-2">

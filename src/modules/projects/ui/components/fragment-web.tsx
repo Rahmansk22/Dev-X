@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Fragment } from "@prisma/client";
-import { ExternalLinkIcon, Loader2, MonitorIcon, MoonIcon, RefreshCcwIcon, SparklesIcon, HexagonIcon, TerminalIcon, LayersIcon, CpuIcon, PlayIcon, ActivityIcon, GlobeIcon, CheckCircle2Icon } from "lucide-react";
+import { ExternalLinkIcon, Loader2, MonitorIcon, MoonIcon, RefreshCcwIcon, SparklesIcon } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import { useState, useCallback, useEffect, useRef } from "react";
@@ -65,9 +65,7 @@ export function FragmentWeb({ data, projectId }: Props) {
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [reconnectError, setReconnectError] = useState<string | null>(null);
   const [isWakingUp, setIsWakingUp] = useState(false);
-  const [wakeupStep, setWakeupStep] = useState(0);
   const [iframeLoadCount, setIframeLoadCount] = useState(0);
-  const [urlVerified, setUrlVerified] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
   const [isAutoFixing, setIsAutoFixing] = useState(false);
   const [autoFixTriggered, setAutoFixTriggered] = useState(false);
@@ -105,7 +103,7 @@ export function FragmentWeb({ data, projectId }: Props) {
       setReconnectError(null);
       setIframeLoadCount(0);
     }
-  }, [data.sandboxUrl]);
+  }, [data.sandboxUrl, currentSandboxUrl]);
 
   // ── PRE-VALIDATE URL before trusting iframe load ──
   // When we get a new URL, poll it until it's reachable, THEN set the iframe src.
@@ -114,7 +112,6 @@ export function FragmentWeb({ data, projectId }: Props) {
     if (!currentSandboxUrl) return;
 
     let cancelled = false;
-    setUrlVerified(false);
     previewPollingRef.current = true;
     previewPollStartedAtRef.current = Date.now();
 
@@ -138,7 +135,6 @@ export function FragmentWeb({ data, projectId }: Props) {
       }
 
       // URL is alive - allow iframe to render
-      setUrlVerified(true);
       setRefreshIdx(i => i + 1);
     })();
 
@@ -150,7 +146,7 @@ export function FragmentWeb({ data, projectId }: Props) {
   }, [currentSandboxUrl]);
 
   // ── Wakeup Logic ──
-  const wakeupSandbox = useCallback(async (silent = false) => {
+  const wakeupSandbox = useCallback(async () => {
     const existingWakeup = wakeupInFlightByProject.get(projectId);
     if (existingWakeup) return existingWakeup;
 
@@ -224,26 +220,21 @@ export function FragmentWeb({ data, projectId }: Props) {
     setIsLoading(true);
     setIframeLoadCount(0);
     setReconnectError(null);
-    setWakeupStep(0);
-    setUrlVerified(false);
 
     // No step interval needed for instant-preview architecture
 
     try {
       const [success] = await Promise.all([
-        wakeupSandbox(false),
+        wakeupSandbox(),
         new Promise(r => setTimeout(r, 1000))
       ]);
 
-      if (success) {
-        // Wakeup returned a new URL - mark as verified since wakeup confirmed it
-        setUrlVerified(true);
-      } else {
+      if (!success) {
         setHasError(true);
         setIsLoading(false);
         setReconnectError("Could not restore the sandbox. Try again or generate a new build.");
       }
-    } catch (err) {
+    } catch {
       setHasError(true);
       setIsLoading(false);
       setReconnectError("Wakeup timed out. The sandbox may need to be recreated.");
@@ -336,11 +327,10 @@ export function FragmentWeb({ data, projectId }: Props) {
       if (res.ok) {
         setAutoFixTriggered(true);
         setBuildError(null);
-        // Auto-refresh preview after fix — give HMR 2.5s to recompile
+        // Auto-refresh preview after fix — perform a clean window reload to completely synchronize the client-side state
         setTimeout(() => {
-          setRefreshIdx(i => i + 1);
-          setAutoFixTriggered(false);
-        }, 2500);
+          window.location.reload();
+        }, 2000);
       }
     } catch (e) {
       console.error('[FragmentWeb] Auto-fix request failed:', e);
@@ -508,6 +498,8 @@ export function FragmentWeb({ data, projectId }: Props) {
               </motion.div>
             )}
           </AnimatePresence>
+
+
         </div>
       )}
     </div>
@@ -645,7 +637,7 @@ function ErrorState({ error, onReconnect, isReconnecting, sandboxUrl, projectId,
   );
 }
 
-function EmptyState({ onReconnect, isReconnecting }: any) {
+function EmptyState({ onReconnect }: any) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-8 p-12 text-center bg-[#050505]">
       <MonitorIcon size={48} className="text-gray-700" />

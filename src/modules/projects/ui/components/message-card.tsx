@@ -3,7 +3,7 @@
 import { Fragment, MessageType, MessageRole } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import confetti from "canvas-confetti";
+import fireConfetti from "canvas-confetti";
 import {
   ChevronRightIcon,
   Code2Icon,
@@ -30,9 +30,16 @@ import {
   LayersIcon,
   ExternalLinkIcon,
   RefreshCcwIcon,
+  BrainIcon,
+  BookOpenIcon,
+  SearchIcon,
+  PencilIcon,
+  AlertTriangleIcon,
 } from "lucide-react";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -81,6 +88,17 @@ function getActionLabel(filePath: string): string {
   return "Compiling source file";
 }
 
+// ─── EMOJI STRIPPER FOR PREMIUM SAAS LOOK ─────────────────────────────────────
+function stripEmojis(text: string): string {
+  if (!text) return "";
+  return text
+    // Remove standard Unicode emoji ranges
+    .replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDC00-\uDFFF]/g, '')
+    // Remove specific checkmarks, icons, indicators commonly used in build logs
+    .replace(/^[✓✗✓▶⏭️🚨🔥📦🚀🤖⚙️🛠️📂💾🖥️⚡🛡️✅⚠️❌🗑️✓\-•\s]+/, '')
+    .trim();
+}
+
 // ─── User Message ─────────────────────────────────────────────────────────────
 
 interface UserMessageProps {
@@ -90,18 +108,19 @@ interface UserMessageProps {
 
 const UserMessage = ({ content, createdAt }: UserMessageProps) => (
   <div className="flex justify-end pb-8 px-4">
-    <div className="flex flex-col items-end max-w-[85%] gap-2">
-      <div className="text-[10px] text-gray-500 font-mono tracking-tighter uppercase tabular-nums">
+    <div className="flex flex-col items-end max-w-[85%] gap-2 group/user-msg">
+      <div className="text-[10px] text-gray-600 font-mono tracking-tighter uppercase tabular-nums opacity-0 group-hover/user-msg:opacity-100 transition-opacity duration-300">
         {formatDistanceToNow(createdAt, { addSuffix: true })}
       </div>
       <div
-        className="px-5 py-4 rounded-3xl rounded-br-none text-white text-[15px] font-medium leading-relaxed tracking-tight"
+        className="px-4 py-2.5 rounded-[1.25rem] rounded-br-[0.35rem] text-blue-50/90 text-[13px] font-normal leading-relaxed tracking-tight relative overflow-hidden backdrop-blur-md border border-blue-500/10"
         style={{
-          background: "linear-gradient(165deg, #2563eb, #1e40af)",
-          boxShadow: "0 8px 32px -8px rgba(37,99,235,0.4)",
+          background: "linear-gradient(135deg, rgba(37,99,235,0.08) 0%, rgba(30,64,175,0.03) 100%)",
+          boxShadow: "0 4px 24px -8px rgba(37,99,235,0.1), inset 0 1px 1px rgba(255,255,255,0.05)",
         }}
       >
-        {content}
+        <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover/user-msg:opacity-100 transition-opacity duration-500 pointer-events-none" />
+        <div className="relative z-10">{content}</div>
       </div>
     </div>
   </div>
@@ -117,75 +136,51 @@ interface FragmentCardProps {
 
 const FragmentCard = ({ fragment, isActiveFragment, onFragmentClick }: FragmentCardProps) => (
   <motion.button
-    initial={{ opacity: 0, scale: 0.98 }}
-    animate={{ opacity: 1, scale: 1 }}
+    initial={{ opacity: 0, y: 5 }}
+    animate={{ opacity: 1, y: 0 }}
     onClick={() => onFragmentClick(fragment)}
     className={cn(
-      "group relative overflow-hidden flex items-center justify-between p-5 rounded-[2rem] border w-full transition-all duration-500 text-left mt-6",
+      "group relative overflow-hidden flex items-center justify-between p-4 rounded-2xl border w-full transition-all duration-300 text-left mt-4",
       isActiveFragment
-        ? "border-blue-500/30 bg-blue-500/[0.08] shadow-[0_0_40px_rgba(59,130,246,0.1)]"
-        : "border-white/5 bg-white/[0.02] hover:border-blue-500/20 hover:bg-blue-500/[0.04]"
+        ? "border-blue-500/30 bg-blue-500/[0.04] shadow-[0_0_30px_rgba(59,130,246,0.06)]"
+        : "border-white/5 bg-white/[0.01] hover:border-blue-500/20 hover:bg-blue-500/[0.02]"
     )}
   >
-    <div className="flex items-center gap-4 relative z-10">
+    <div className="flex items-center gap-3 relative z-10">
       <div className={cn(
-        "p-3.5 rounded-2xl border transition-colors duration-500",
+        "p-2.5 rounded-xl border transition-colors duration-300",
         isActiveFragment
-          ? "bg-blue-500/20 border-blue-500/30 text-blue-400 shadow-[0_0_20px_rgba(59,130,246,0.2)]"
+          ? "bg-blue-500/10 border-blue-500/20 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.1)]"
           : "bg-white/5 border-white/8 text-gray-500 group-hover:text-blue-400"
       )}>
-        <TerminalIcon size={20} strokeWidth={2.5} />
+        <TerminalIcon size={16} strokeWidth={2.5} />
       </div>
-      <div className="flex flex-col gap-1">
-        <span className="font-bold text-[15px] text-white tracking-tight">
+      <div className="flex flex-col gap-0.5">
+        <span className="font-bold text-[13px] text-white tracking-tight">
           {fragment.title || "Production Build"}
         </span>
-        <div className="flex items-center gap-2 text-[11px] font-bold text-gray-500 uppercase tracking-widest">
-          <PlayIcon size={10} className="fill-current" />
+        <div className="flex items-center gap-1.5 text-[9px] font-bold text-gray-500 uppercase tracking-widest leading-none">
+          <PlayIcon size={8} className="fill-current" />
           <span>Deploy Interactive Interface</span>
         </div>
       </div>
     </div>
     <ChevronRightIcon
-      size={20}
+      size={16}
       className={cn(
-        "transition-all duration-500 relative z-10",
-        isActiveFragment ? "text-blue-400" : "text-gray-700 group-hover:text-blue-400 group-hover:translate-x-1"
+        "transition-all duration-300 relative z-10",
+        isActiveFragment ? "text-blue-400" : "text-gray-700 group-hover:text-blue-400 group-hover:translate-x-0.5"
       )}
     />
-
-    {/* Decorative blur */}
-    <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 blur-[60px] pointer-events-none" />
   </motion.button>
 );
 
 // ─── Emergent Chat Activity ───────────────────────────────────────────────────
-
 interface EmergentActivityProps {
   fileActions: any[];
   isGenerating: boolean;
   onFileClick?: (path: string) => void;
 }
-
-const INIT_STEPS = [
-  { icon: CpuIcon, text: "Logic Synthesis & Requirements Analysis", color: "text-blue-400" },
-  { icon: LayersIcon, text: "Structural Architecture Mapping", color: "text-indigo-400" },
-  { icon: GlobeIcon, text: "Environment Virtualization (Sandbox Build)", color: "text-emerald-400" },
-];
-
-const LoadingPulse = () => (
-  <div className="flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full">
-    {[0, 1, 2].map((i) => (
-      <motion.div
-        key={i}
-        className="w-1 h-1 rounded-full bg-blue-400"
-        animate={{ opacity: [0.2, 1, 0.2] }}
-        transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.3 }}
-      />
-    ))}
-    <span className="text-[9px] font-black uppercase text-blue-400 ml-1 tracking-widest">Synchronizing</span>
-  </div>
-);
 
 const EmergentActivity = ({ fileActions, isGenerating, onFileClick }: EmergentActivityProps) => {
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
@@ -200,18 +195,15 @@ const EmergentActivity = ({ fileActions, isGenerating, onFileClick }: EmergentAc
     });
   }, [fileActions]);
 
-  // 🔴 PROGRESSIVE REVEAL: Show files one-by-one with a stagger delay
-  // Even if all files arrive at once, they animate in sequentially
   useEffect(() => {
     if (uniqueFiles.length > revealedCount) {
       const timer = setTimeout(() => {
         setRevealedCount((prev) => Math.min(prev + 1, uniqueFiles.length));
-      }, 100); // 100ms delay between each file reveal
+      }, 80);
       return () => clearTimeout(timer);
     }
   }, [uniqueFiles.length, revealedCount]);
 
-  // When generation is done and all files are shown, ensure all are revealed
   useEffect(() => {
     if (!isGenerating && uniqueFiles.length > 0) {
       setRevealedCount(uniqueFiles.length);
@@ -221,50 +213,9 @@ const EmergentActivity = ({ fileActions, isGenerating, onFileClick }: EmergentAc
   const visibleFiles = uniqueFiles.slice(0, revealedCount);
 
   return (
-    <div className="flex flex-col gap-6 w-full mt-6 perspective-1000">
-      {/* 🛠️ System Intelligence Layer */}
-      <AnimatePresence mode="popLayout">
-        {isGenerating && (
-          <motion.div
-            initial={{ opacity: 0, y: 20, rotateX: -15 }}
-            animate={{ opacity: 1, y: 0, rotateX: 0 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="flex flex-col gap-3 bg-[#0a0a0a]/80 backdrop-blur-xl border border-white/[0.08] rounded-[2rem] p-5 shadow-[0_20px_50px_rgba(0,0,0,0.4)] relative overflow-hidden"
-          >
-            <div className="absolute top-0 right-0 p-4 opacity-20 rotate-12">
-              <CpuIcon size={48} className="text-blue-500" />
-            </div>
-
-            <div className="flex items-center gap-3 mb-2">
-              <div className="size-2 rounded-full bg-blue-500 animate-ping" />
-              <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">Dev X Architecture Synthesis</span>
-              {uniqueFiles.length > 0 && (
-                <span className="text-[9px] font-bold text-gray-500 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 tabular-nums">
-                  {revealedCount}/{uniqueFiles.length} files
-                </span>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {INIT_STEPS.map((step, i) => (
-                <motion.div
-                  key={step.text}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: i * 0.1 }}
-                  className="flex flex-col gap-2 p-3 bg-white/[0.03] border border-white/5 rounded-2xl"
-                >
-                  <step.icon size={16} className={cn(step.color, "opacity-80")} />
-                  <span className="text-[10px] text-gray-400 font-bold leading-tight uppercase tracking-wide">{step.text}</span>
-                </motion.div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* 📦 Object Manufacturing Deck */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-3 relative">
+    <div className="flex flex-col gap-2 w-full mt-3 pl-1">
+      {/* 📦 Minimal, Clean Artifact Flow */}
+      <div className="flex flex-col gap-1.5">
         <AnimatePresence mode="popLayout">
           {visibleFiles.map((action, i) => {
             const isExpanding = expandedFile === action.file;
@@ -274,72 +225,50 @@ const EmergentActivity = ({ fileActions, isGenerating, onFileClick }: EmergentAc
               <motion.div
                 key={action.file}
                 layout
-                initial={{ opacity: 0, x: -20, rotateY: -10, scale: 0.9 }}
-                animate={{ opacity: 1, x: 0, rotateY: 0, scale: 1 }}
-                transition={{
-                  duration: 0.6,
-                  ease: [0.16, 1, 0.3, 1],
-                  layout: { duration: 0.4 }
-                }}
-                className={cn(
-                  "group/card relative rounded-[1.5rem] border transition-all duration-300",
-                  isExpanding
-                    ? "col-span-full border-blue-500/40 bg-blue-500/[0.08] shadow-[0_20px_60px_rgba(59,130,246,0.15)] ring-1 ring-blue-500/20"
-                    : "border-white/[0.05] bg-white/[0.02] hover:border-white/[0.1] hover:bg-white/[0.05] shadow-lg"
-                )}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+                className="w-full"
               >
-                <div className="p-4 flex items-center justify-between gap-4">
+                <div className="flex items-center justify-between py-1.5 px-2.5 rounded-xl hover:bg-white/[0.03] transition-colors group/item">
                   <button
                     onClick={() => onFileClick?.(action.file)}
-                    className="flex items-center gap-4 flex-1 min-w-0"
+                    className="flex items-center gap-3 text-left min-w-0 flex-1"
                   >
-                    <div className="relative">
-                      <div className="shrink-0 size-11 rounded-2xl bg-[#0d0d0d] border border-white/[0.08] flex items-center justify-center relative z-10 shadow-inner overflow-hidden group-hover/card:border-blue-500/40 transition-colors">
-                        <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent pointer-events-none" />
-                        {getIconForFile(action.file)}
-                      </div>
+                    <div className="shrink-0 size-8 rounded-lg bg-white/[0.02] border border-white/[0.06] flex items-center justify-center relative shadow-sm group-hover/item:border-blue-500/30 transition-colors">
+                      {getIconForFile(action.file)}
                       {isGenerating && isLast && (
-                        <motion.div
-                          className="absolute -top-1 -right-1 size-3 bg-blue-500 rounded-full border-2 border-black"
-                          animate={{ scale: [1, 1.3, 1] }}
-                          transition={{ repeat: Infinity, duration: 1 }}
-                        />
+                        <span className="absolute -top-0.5 -right-0.5 size-1.5 bg-blue-500 rounded-full animate-pulse" />
                       )}
                     </div>
-
-                    <div className="flex flex-col gap-0.5 text-left min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-black text-white/90 uppercase tracking-[0.05em] truncate">
-                          {action.file.split('/').pop()}
-                        </span>
-                        <div className="px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest bg-white/[0.05] text-gray-500 border border-white/[0.03]">
-                          {action.file.includes('component') ? 'UI_OBJ' : 'LOGIC_NODE'}
-                        </div>
-                      </div>
-                      <span className="text-[10px] text-gray-600 font-mono truncate max-w-[180px]">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[12px] font-semibold text-white/95 truncate">
+                        {action.file.split('/').pop()}
+                      </span>
+                      <span className="text-[10px] text-gray-500 font-mono truncate max-w-[220px] hidden sm:inline">
                         {action.file}
                       </span>
                     </div>
                   </button>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0 opacity-40 group-hover/item:opacity-100 transition-opacity">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         setExpandedFile(isExpanding ? null : action.file);
                       }}
                       className={cn(
-                        "size-8 rounded-xl flex items-center justify-center transition-all",
-                        isExpanding ? "bg-blue-500/20 text-blue-400" : "bg-white/[0.03] text-gray-600 hover:text-white"
+                        "size-7 rounded-lg flex items-center justify-center transition-all",
+                        isExpanding ? "bg-blue-500/10 text-blue-400" : "text-gray-400 hover:text-white"
                       )}
                     >
-                      <Code2Icon size={14} />
+                      <Code2Icon size={12} />
                     </button>
                     <button
                       onClick={() => onFileClick?.(action.file)}
-                      className="size-8 rounded-xl bg-white/[0.03] text-gray-600 hover:text-white flex items-center justify-center transition-all"
+                      className="size-7 rounded-lg text-gray-400 hover:text-white flex items-center justify-center transition-all"
                     >
-                      <ExternalLinkIcon size={14} />
+                      <ExternalLinkIcon size={12} />
                     </button>
                   </div>
                 </div>
@@ -351,19 +280,14 @@ const EmergentActivity = ({ fileActions, isGenerating, onFileClick }: EmergentAc
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: "auto", opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden border-t border-blue-500/10"
+                      className="overflow-hidden ml-11 mr-2 my-1"
                     >
-                      <div className="p-4 pt-2">
-                        <div className="bg-black/95 rounded-xl border border-white/5 p-3 font-mono text-[10px] leading-relaxed relative group/code">
-                          <pre className="text-blue-300/80 max-h-[120px] overflow-auto scrollbar-hide selection:bg-blue-500/30">
-                            <code>{action.content}</code>
-                          </pre>
-                          <div className="absolute top-2 right-2 flex items-center gap-2">
-                            <div className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 text-[8px] font-black uppercase tracking-widest">
-                              Live Stream
-                            </div>
-                          </div>
-                          <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-black to-transparent pointer-events-none" />
+                      <div className="bg-black/40 rounded-xl border border-white/[0.04] p-3 font-mono text-[10px] leading-relaxed relative group/code shadow-inner">
+                        <pre className="text-blue-300/80 max-h-[120px] overflow-auto scrollbar-hide selection:bg-blue-500/30">
+                          <code>{action.content}</code>
+                        </pre>
+                        <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 text-[8px] font-black uppercase tracking-widest leading-none">
+                          Live Stream
                         </div>
                       </div>
                     </motion.div>
@@ -378,29 +302,90 @@ const EmergentActivity = ({ fileActions, isGenerating, onFileClick }: EmergentAc
       {/* 🛡️ Verification Signal */}
       {!isGenerating && visibleFiles.length > 0 && (
         <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
+          initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="p-5 rounded-[2.5rem] bg-gradient-to-r from-blue-600/10 to-transparent border border-blue-500/20 flex flex-col sm:flex-row items-center gap-5 relative overflow-hidden group"
+          className="mt-2 py-2.5 px-3 rounded-xl bg-blue-500/[0.03] border border-blue-500/10 flex items-center gap-3"
         >
-          <div className="absolute inset-0 bg-blue-500/[0.02] translate-x-12 translate-y-12 rotate-45 pointer-events-none" />
-          <div className="size-14 rounded-[1.5rem] bg-blue-500/20 border border-blue-500/30 flex items-center justify-center shadow-[0_0_30px_rgba(59,130,246,0.3)] group-hover:scale-110 transition-transform duration-700">
-            <ShieldCheckIcon size={28} className="text-blue-400" />
-          </div>
-          <div className="flex flex-col text-center sm:text-left">
-            <span className="text-xs font-black text-white uppercase tracking-[0.2em] mb-1">Architecture Stabilized</span>
-            <p className="text-[11px] text-gray-500 font-medium leading-relaxed max-w-sm">
-              Production-grade Dev X synthesis complete. Your application core has been verified and instantiated in the edge sandbox.
-            </p>
-          </div>
-          <div className="sm:ml-auto flex items-center gap-2 px-4 py-2 bg-white/[0.03] border border-white/10 rounded-2xl text-[10px] font-black text-blue-400 uppercase tracking-widest">
-            <CheckIcon size={12} />
-            Verified
+          <ShieldCheckIcon size={14} className="text-blue-400 shrink-0" />
+          <span className="text-[11px] text-gray-400 leading-none">
+            Architecture verified and synced cleanly at the edge.
+          </span>
+          <div className="ml-auto text-[8px] font-bold text-blue-400 uppercase tracking-widest leading-none">
+            Ready
           </div>
         </motion.div>
       )}
     </div>
   );
 };
+
+// ─── Step Details Parser for Premium Agent Timeline ───
+function getStepDetails(title: string) {
+  const text = title.toLowerCase();
+  
+  if (text.includes("think") || text.includes("understand") || text.includes("inspect") || text.includes("analyz") || text.includes("review") || text.includes("prepar")) {
+    return {
+      icon: <BrainIcon size={14} className="text-purple-400 shrink-0 animate-pulse" />,
+      color: "border-purple-500/20 bg-purple-500/5 text-purple-300",
+      label: "Thinking"
+    };
+  }
+  if (text.includes("read") || text.includes("sourc") || text.includes("view")) {
+    return {
+      icon: <BookOpenIcon size={14} className="text-blue-400 shrink-0" />,
+      color: "border-blue-500/20 bg-blue-500/5 text-blue-300",
+      label: "Reading File"
+    };
+  }
+  if (text.includes("search") || text.includes("find") || text.includes("locat")) {
+    return {
+      icon: <SearchIcon size={14} className="text-cyan-400 shrink-0" />,
+      color: "border-cyan-500/20 bg-cyan-500/5 text-cyan-300",
+      label: "Searching"
+    };
+  }
+  if (text.includes("update") || text.includes("refactor") || text.includes("writ") || text.includes("generat") || text.includes("edit") || text.includes("creat")) {
+    return {
+      icon: <PencilIcon size={14} className="text-amber-400 shrink-0" />,
+      color: "border-amber-500/20 bg-amber-500/5 text-amber-300",
+      label: "Editing"
+    };
+  }
+  if (text.includes("run") || text.includes("install") || text.includes("npm") || text.includes("command")) {
+    return {
+      icon: <TerminalIcon size={14} className="text-slate-400 shrink-0" />,
+      color: "border-slate-500/20 bg-slate-500/5 text-slate-300",
+      label: "Running Command"
+    };
+  }
+  if (text.includes("verify") || text.includes("validat") || text.includes("check") || text.includes("test")) {
+    return {
+      icon: <CheckCircle2Icon size={14} className="text-emerald-400 shrink-0 animate-bounce" />,
+      color: "border-emerald-500/20 bg-emerald-500/5 text-emerald-300",
+      label: "Testing"
+    };
+  }
+  if (text.includes("success") || text.includes("complete") || text.includes("stabiliz") || text.includes("ready") || text.includes("live")) {
+    return {
+      icon: <CheckCircle2Icon size={14} className="text-green-400 shrink-0" />,
+      color: "border-green-500/20 bg-green-500/5 text-green-300",
+      label: "Success"
+    };
+  }
+  if (text.includes("error") || text.includes("fail") || text.includes("crash")) {
+    return {
+      icon: <AlertTriangleIcon size={14} className="text-rose-400 shrink-0 animate-bounce" />,
+      color: "border-rose-500/20 bg-rose-500/5 text-rose-300",
+      label: "Error"
+    };
+  }
+  
+  return {
+    icon: <CpuIcon size={14} className="text-blue-400 shrink-0" />,
+    color: "border-blue-500/20 bg-blue-500/5 text-blue-300",
+    label: "Thinking"
+  };
+}
 
 // ─── Assistant Message ─────────────────────────────────────────────────────────
 
@@ -428,6 +413,14 @@ const AssistantMessage = ({
   fileActions = [],
 }: AssistantMessageProps) => {
   const [copied, setCopied] = useState(false);
+  const [showThinking, setShowThinking] = useState(isGenerating);
+
+  // Keep timeline open while actively generating
+  useEffect(() => {
+    if (isGenerating) {
+      setShowThinking(true);
+    }
+  }, [isGenerating]);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -452,7 +445,7 @@ const AssistantMessage = ({
       const colors = ['#ff0000', '#ff6600', '#ffcc00', '#33cc33', '#0099ff', '#9933ff', '#ff33cc', '#00ffcc'];
 
       const frame = () => {
-        confetti({
+        fireConfetti({
           particleCount: 4,
           angle: 60,
           spread: 70,
@@ -460,7 +453,7 @@ const AssistantMessage = ({
           colors,
           zIndex: 9999,
         });
-        confetti({
+        fireConfetti({
           particleCount: 4,
           angle: 120,
           spread: 70,
@@ -475,7 +468,7 @@ const AssistantMessage = ({
       };
 
       // Initial big burst from center
-      confetti({
+      fireConfetti({
         particleCount: 120,
         spread: 100,
         origin: { y: 0.5, x: 0.5 },
@@ -487,23 +480,116 @@ const AssistantMessage = ({
         ticks: 200,
       });
 
-      // Then continuous side bursts
       frame();
     }
   }, [isResult, fragment, isGenerating]);
 
+  const lines = useMemo(() => {
+    return content ? content.split("\n").filter(line => line.trim().length > 0) : [];
+  }, [content]);
+
+  const narrationText = useMemo(() => {
+    return lines.length > 0 ? lines[0] : "";
+  }, [lines]);
+
+  const thinkingSteps = useMemo(() => {
+    return lines.length > 1 ? lines.slice(1) : [];
+  }, [lines]);
+
+  const isBoilerplate = useMemo(() => {
+    const trimmed = narrationText.trim();
+    return trimmed === "Generating your app..." || trimmed === "App generated!" || trimmed === "Here is your custom application!";
+  }, [narrationText]);
+
+  // Construct a merged chronological list of pipeline statuses AND actual real-time file actions
+  const mergedSteps = useMemo(() => {
+    const earlyStatuses: string[] = [];
+    const lateStatuses: string[] = [];
+
+    thinkingSteps.forEach(stepText => {
+      const lower = stepText.toLowerCase();
+      const isLate = 
+        lower.includes("writing") || 
+        lower.includes("quality checks") || 
+        lower.includes("deploying") || 
+        lower.includes("starting the development") || 
+        lower.includes("compiling") || 
+        lower.includes("server started") || 
+        lower.includes("live and ready");
+
+      if (isLate) {
+        lateStatuses.push(stepText);
+      } else {
+        earlyStatuses.push(stepText);
+      }
+    });
+
+    const steps: Array<{
+      id: string;
+      title: string;
+      details?: string;
+      badge?: string | null;
+      isFile?: boolean;
+      isSuccess?: boolean;
+      isWarning?: boolean;
+      isCurrent?: boolean;
+    }> = [];
+
+    earlyStatuses.forEach((text, idx) => {
+      steps.push({
+        id: `early-${idx}`,
+        title: text,
+        isCurrent: isGenerating && idx === earlyStatuses.length - 1 && fileActions.length === 0 && lateStatuses.length === 0
+      });
+    });
+
+    fileActions.forEach((action, idx) => {
+      const isEdit = action.type === "edit";
+      const actionName = isEdit ? "Edit" : "Create";
+      const filename = action.file.split('/').pop() || "";
+      steps.push({
+        id: `file-${action.file}-${idx}`,
+        title: actionName,
+        details: filename,
+        badge: action.details ? (action.details.startsWith("+") ? action.details : `+${action.details}`) : null,
+        isFile: true,
+        isSuccess: true,
+        isCurrent: isGenerating && idx === fileActions.length - 1 && lateStatuses.length === 0
+      });
+    });
+
+    lateStatuses.forEach((text, idx) => {
+      const isLive = text.includes("live and ready");
+      steps.push({
+        id: `late-${idx}`,
+        title: text,
+        isSuccess: isLive,
+        isCurrent: isGenerating && idx === lateStatuses.length - 1
+      });
+    });
+
+    return steps;
+  }, [thinkingSteps, fileActions, isGenerating]);
+
+  const latestStepText = useMemo(() => {
+    if (mergedSteps.length === 0) return "";
+    const last = mergedSteps[mergedSteps.length - 1];
+    if (last.isFile) return `${last.title} ${last.details} ${last.badge || ""}`;
+    return stripEmojis(last.title);
+  }, [mergedSteps]);
+
+  useEffect(() => {
+    // Scroll handling for mergedSteps if needed in the future
+  }, [mergedSteps.length]);
+
   return (
     <div className="flex justify-start pb-10 px-4">
       <div className="flex flex-col items-start w-full max-w-[95%] gap-3">
-
-        {/* Identity & Status */}
         <div className="flex items-center justify-between w-full pr-4">
           <div className="flex items-center gap-3">
-            <div className="size-8 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center p-1.5 relative">
-              <CpuIcon size={16} className="text-blue-400" />
-              {isGenerating && (
-                <div className="absolute -top-0.5 -right-0.5 size-2 bg-blue-500 rounded-full border-2 border-black animate-pulse" />
-              )}
+            <div className="size-8 rounded-xl bg-gradient-to-br from-blue-500/10 via-indigo-500/5 to-purple-500/10 border border-blue-500/25 flex items-center justify-center p-1.5 relative shadow-[0_0_15px_rgba(59,130,246,0.15)]">
+              <img src="/logo.svg" className="size-full object-contain" alt="DevX Engine Logo" />
+              {isGenerating && <div className="absolute -top-0.5 -right-0.5 size-2 bg-blue-400 rounded-full border-2 border-black animate-ping" />}
             </div>
             <div className="flex flex-col">
               <span className="text-[11px] font-black text-white uppercase tracking-widest leading-none">DEV-X ENGINE</span>
@@ -514,29 +600,115 @@ const AssistantMessage = ({
           </div>
         </div>
 
-        {/* ── ANALYSIS & PROGRESS ── */}
-        {(isAnalyzing || (isResult && fileActions.length > 0)) && (
-          <div className="w-full">
-            <EmergentActivity fileActions={fileActions} isGenerating={isGenerating} onFileClick={onFileClick} />
+        {/* ── TEXT CONTENT ── */}
+        {narrationText && narrationText.trim().length > 0 && !isBoilerplate && (
+          <div className="w-full text-[13px] text-gray-300/90 leading-relaxed font-normal mt-1 px-1">
+            <div className="relative z-10 prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-a:text-blue-400 hover:prose-a:text-blue-300 prose-code:text-blue-200 prose-code:bg-blue-500/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:before:content-none prose-code:after:content-none prose-ul:list-disc prose-ul:pl-4 prose-ol:list-decimal prose-ol:pl-4">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{narrationText}</ReactMarkdown>
+            </div>
           </div>
         )}
 
-        {/* ── TEXT CONTENT ── */}
-        {!isAnalyzing && content && content !== "Generating your app..." && content !== "App generated!" && (
-          <div
-            className="px-5 py-4 rounded-3xl rounded-bl-none shadow-2xl text-[15px] font-medium leading-relaxed border border-white/5 group relative w-full mt-2"
-            style={{ backgroundColor: "#0c0c0c", color: "#d1d5db" }}
-          >
-            <button
-              onClick={handleCopy}
-              className="absolute top-4 right-4 p-2 hover:bg-white/5 rounded-xl text-gray-500 hover:text-white transition-all opacity-0 group-hover:opacity-100"
-            >
-              {copied
-                ? <CheckIcon size={14} className="text-green-500" />
-                : <CopyIcon size={14} />
-              }
-            </button>
-            {content}
+        {/* ── COLLAPSIBLE AGENT TIMELINE ── */}
+        {mergedSteps.length > 0 && (
+          <div className="w-full mt-1.5 relative z-20 pl-1">
+            <div className="overflow-hidden transition-all duration-300">
+              {/* Collapsible Trigger */}
+              <button
+                onClick={() => setShowThinking(!showThinking)}
+                className="flex items-center gap-2 py-1.5 px-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 active:bg-white/10 transition-all text-left"
+              >
+                <div className="size-5 rounded bg-blue-500/10 flex items-center justify-center">
+                  <motion.div
+                    animate={isGenerating ? { rotate: 360 } : {}}
+                    transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                  >
+                    <CpuIcon size={11} className="text-blue-400" />
+                  </motion.div>
+                </div>
+                <span className="text-[11px] font-semibold tracking-tight">
+                  {isGenerating ? "Analyzing & building..." : "Execution steps"}
+                </span>
+                <div className="px-1 py-0.5 rounded bg-white/5 text-[8px] font-bold text-slate-500 leading-none">
+                  {mergedSteps.length}
+                </div>
+                <ChevronRightIcon
+                  size={12}
+                  className={cn(
+                    "text-gray-500 transition-transform duration-300",
+                    showThinking ? "rotate-90" : "rotate-0"
+                  )}
+                />
+                {isGenerating && (
+                  <span className="text-[9px] text-blue-400/80 animate-pulse font-mono truncate max-w-[180px] ml-2">
+                    ({latestStepText || "Orchestrating..."})
+                  </span>
+                )}
+              </button>
+
+              {/* Steps Area */}
+              <AnimatePresence initial={false}>
+                {showThinking && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2, ease: "easeInOut" }}
+                    className="overflow-hidden border-l border-white/5 ml-3.5 pl-4 mt-2"
+                  >
+                    <div className="flex flex-col gap-3 py-1">
+                      {mergedSteps.map((step, idx) => {
+                        const stepConfig = getStepDetails(step.title);
+                        const isCurrent = step.isCurrent;
+                        
+                        return (
+                          <motion.div
+                            key={step.id}
+                            initial={{ opacity: 0, x: -5 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className="flex items-center gap-2.5 group/step text-[11.5px]"
+                          >
+                            <div className={cn(
+                              "size-5 rounded flex items-center justify-center transition-all shrink-0",
+                              isCurrent ? "bg-blue-500/10 text-blue-400" : "text-gray-500"
+                            )}>
+                              {isCurrent ? (
+                                <Loader2Icon size={10} className="animate-spin text-blue-400" />
+                              ) : (
+                                stepConfig.icon
+                              )}
+                            </div>
+                            <span className={cn(
+                              "font-medium tracking-tight",
+                              isCurrent ? "text-blue-400" : "text-gray-400"
+                            )}>
+                              {stripEmojis(step.title)}
+                            </span>
+                            {step.details && (
+                              <span className="text-[10px] text-gray-500 font-mono truncate max-w-[200px]">
+                                {step.details}
+                              </span>
+                            )}
+                            {step.badge && (
+                              <span className="px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 text-[8px] font-black uppercase tracking-wider leading-none">
+                                {step.badge}
+                              </span>
+                            )}
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+        )}
+
+        {/* ── ANALYSIS & PROGRESS (Files) ── */}
+        {fileActions.length > 0 && (
+          <div className="w-full mt-2">
+            <EmergentActivity fileActions={fileActions} isGenerating={isGenerating} onFileClick={onFileClick} />
           </div>
         )}
 

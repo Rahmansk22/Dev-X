@@ -124,7 +124,7 @@ For each const/let/const [...] = :
 If unused variable found: REMOVE or prefix with _ before returning
 \`\`\`
 
-### BLOCK 6: EXPORT/IMPORT MATCHING
+### BLOCK 6: EXPORT/IMPORT MATCHING & FILE CASING SENSITIVITY
 \`\`\`
 Check all imports match exports:
   ❌ export default function Page()
@@ -138,6 +138,22 @@ Check all imports match exports:
   
   ✅ export default function Page() {}
      import Page from './page'
+
+CASE-SENSITIVE FILE NAME MATCHING (ZERO TOLERANCE FOR LINUX COMPATIBILITY):
+  On Linux development servers (E2B sandbox), files are strictly case-sensitive. Capitalization mismatches between import paths and actual filenames will crash the build.
+  ❌ import MovieModal from "@/components/movieModal" (lowercase 'm')
+     but creating file: components/MovieModal.tsx (capital 'M')  ← FATAL BUILD CRASH
+  
+  ❌ import { fetchItems } from "@/lib/Api" (capital 'A')
+     but creating file: lib/api.ts (lowercase 'a')  ← FATAL BUILD CRASH
+
+  ✅ import MovieModal from "@/components/MovieModal"
+     and creating file: components/MovieModal.tsx (casings are 100% identical)
+
+  ✅ import { fetchItems } from "@/lib/api"
+     and creating file: lib/api.ts (casings are 100% identical)
+
+  CRITICAL RULE: The exact spelling and capitalization used in all import statements MUST be 100% identical to the actual filename casings on disk.
 
 If mismatch found: FIX before returning
 \`\`\`
@@ -292,7 +308,7 @@ PASS CRITERIA:
 ✅ "use client" on LINE 1 if needed
 ✅ All JSX entities escaped properly
 ✅ No unused variables (or prefixed with _)
-✅ Export/import syntax matches
+✅ Export/import syntax matches & file casing is 100% case-identical to imports
 ✅ No @ts-ignore (only @ts-expect-error)
 ✅ Images use next/image (not <img>)
 ✅ No null-access errors (using optional chaining)

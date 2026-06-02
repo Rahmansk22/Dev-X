@@ -1,114 +1,126 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
 import prisma from '@/lib/db';
 import { getCurrentUserId } from '@/lib/auth';
-import { deployApp } from '@/deployment/integration';
+import { VercelDeploymentAdapter } from '@/deployment/adapters/vercel-adapter';
 
 /**
- * POST /api/projects/[id]/deploy - Deploy project
+ * POST /api/projects/[id]/deploy
+ * 
+ * Deploy project files from DB to Vercel via REST API.
+ * Like Lovable/Replit — one click, get a permanent .vercel.app URL.
  */
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
+  const t0 = Date.now();
   try {
     const userId = await getCurrentUserId();
     const params = await context.params;
     const projectId = params.id;
     const body = await request.json().catch(() => ({}));
-    const provider =
-      body?.provider === 'railway' ||
-      body?.provider === 'fly' ||
-      body?.provider === 'netlify'
-        ? body.provider
-        : 'vercel';
 
+    if (!userId) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // 1. Get project + latest files from fragment
     const project = await prisma.project.findFirst({
       where: { id: projectId, userId },
       select: { id: true, name: true },
     });
 
     if (!project) {
-      return NextResponse.json(
-        { success: false, error: 'Project not found' },
-        { status: 404 },
-      );
+      return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
     }
 
-    const workspaceRoot = process.cwd();
-    const requestedSource = typeof body?.sourceDir === 'string' ? body.sourceDir : '.';
-    const resolvedSourceDir = path.resolve(workspaceRoot, requestedSource);
+    const latestFragment = await prisma.fragment.findFirst({
+      where: { message: { projectId } },
+      orderBy: { createdAt: 'desc' },
+    });
 
-    if (!resolvedSourceDir.startsWith(workspaceRoot)) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid source directory path' },
-        { status: 400 },
-      );
+    if (!latestFragment?.files) {
+      return NextResponse.json({ success: false, error: 'No files found. Generate the app first.' }, { status: 400 });
     }
 
-    if (!fs.existsSync(resolvedSourceDir)) {
-      return NextResponse.json(
-        { success: false, error: 'Deployment source directory does not exist' },
-        { status: 400 },
-      );
+    const files = latestFragment.files as Record<string, string>;
+    const fileCount = Object.keys(files).length;
+
+    if (fileCount === 0) {
+      return NextResponse.json({ success: false, error: 'Project has no files to deploy.' }, { status: 400 });
     }
 
+    // 2. Get Vercel token
     const apiKey =
       typeof body?.apiKey === 'string' && body.apiKey.trim().length > 0
         ? body.apiKey.trim()
         : process.env.VERCEL_TOKEN;
 
-    if (provider === 'vercel' && !apiKey) {
+    if (!apiKey) {
       return NextResponse.json(
-        { success: false, error: 'VERCEL_TOKEN is not configured on the server' },
+        { success: false, error: 'VERCEL_TOKEN is not configured. Add it to your .env file.' },
         { status: 400 },
       );
     }
 
-    const deployment = await deployApp(
-      project.id,
-      userId,
-      typeof body?.buildId === 'string' && body.buildId.trim().length > 0
-        ? body.buildId
-        : `manual-${Date.now()}`,
-      {
-        provider,
-        projectId: project.id,
-        apiKey: apiKey || '',
-        region: typeof body?.region === 'string' ? body.region : undefined,
-        customDomain: typeof body?.customDomain === 'string' ? body.customDomain : undefined,
-        environment:
-          body?.environment && typeof body.environment === 'object'
-            ? body.environment
-            : undefined,
-      },
-      resolvedSourceDir,
-      project.name,
-    );
+    console.log(`[Deploy] 🚀 Deploying ${fileCount} files for "${project.name}" to Vercel...`);
 
-    return NextResponse.json({
-      success: deployment.result.status === 'success',
-      message:
-        deployment.result.status === 'success'
-          ? 'Deployment completed'
-          : 'Deployment failed',
+    // 3. Deploy via Vercel API
+    const adapter = new VercelDeploymentAdapter({
+      provider: 'vercel',
       projectId: project.id,
-      provider,
+      apiKey,
+    });
+
+    const result = await adapter.deployFiles(files, project.name);
+
+    // 4. Save deployment record to DB
+    await prisma.deployment.create({
       data: {
-        deploymentId: deployment.id,
-        status: deployment.result.status,
-        url: deployment.result.url,
-        previewUrl: deployment.result.previewUrl,
-        error: deployment.result.error,
-        logs: deployment.result.logs,
+        projectId: project.id,
+        version: 1,
+        provider: 'vercel',
+        status: result.status === 'success' ? 'success' : 'failed',
+        deploymentUrl: result.url || null,
+        deploymentId: result.deploymentId || null,
+        duration: result.duration ? Math.round(result.duration / 1000) : null,
+        error: result.error || null,
+        metadata: {
+          logs: result.logs,
+          previewUrl: result.previewUrl,
+          fileCount,
+        },
       },
     });
+
+    // Also save to the Deploy table for quick access
+    await prisma.deploy.create({
+      data: {
+        userId,
+        projectId: project.id,
+        url: result.url || null,
+        status: result.status === 'success' ? 'SUCCESS' : 'FAILED',
+        error: result.error || null,
+      },
+    });
+
+    const totalMs = Date.now() - t0;
+    console.log(`[Deploy] ${result.status === 'success' ? '✅' : '❌'} Done in ${totalMs}ms — ${result.url || 'no URL'}`);
+
+    return NextResponse.json({
+      success: result.status === 'success',
+      url: result.url || null,
+      previewUrl: result.previewUrl || null,
+      deploymentId: result.deploymentId,
+      status: result.status,
+      duration: totalMs,
+      error: result.error || null,
+    });
   } catch (error: any) {
-    const status = String(error?.message || '').includes('Unauthorized') ? 401 : 400;
+    console.error('[Deploy] Error:', error);
     return NextResponse.json(
       { success: false, error: error.message },
-      { status },
+      { status: 500 },
     );
   }
 }

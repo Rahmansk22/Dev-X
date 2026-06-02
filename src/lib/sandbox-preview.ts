@@ -11,6 +11,30 @@ export const DEFAULT_E2B_TEMPLATE =
   process.env.E2B_TEMPLATE ||
   PRIMARY_E2B_TEMPLATE_NAME;
 
+/**
+ * Canonical next.config.ts — single source of truth.
+ * Used by normalizePreviewFiles, sanitizePreviewFile, and autofix.
+ * The AI-generated version is ALWAYS replaced by this.
+ */
+export const CANONICAL_NEXT_CONFIG_TS = `import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  reactStrictMode: true,
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
+  serverExternalPackages: ["@prisma/client"],
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "images.unsplash.com" },
+      { protocol: "https", hostname: "source.unsplash.com" },
+      { protocol: "https", hostname: "images.pexels.com" },
+    ],
+  },
+};
+
+export default nextConfig;
+`;
+
 export const PREVIEW_CORE_RUNTIME_DEPENDENCIES: Record<string, string> = {
   next: "15.4.10",
   react: "19.1.4",
@@ -806,6 +830,24 @@ export { ScrollArea, ScrollBar };
 export function sanitizeShadcnUtilities(content: string): string {
   // Order matters: replace longer compound classes first to avoid partial matches
   const replacements: [RegExp, string][] = [
+    // ═══ PHASE 0: Strip Tailwind v4 CSS-variable function syntax ═══
+    // LLMs (especially DeepSeek) hallucinate `text-(--muted-foreground)` etc.
+    // which breaks JS string parsing.  Normalize to plain token form first,
+    // then the rules below convert them to concrete Tailwind colors.
+    [/text-\(--([a-z-]+)\)/g, "text-$1"],
+    [/bg-\(--([a-z-]+)\)/g, "bg-$1"],
+    [/border-\(--([a-z-]+)\)/g, "border-$1"],
+    [/ring-\(--([a-z-]+)\)/g, "ring-$1"],
+    [/outline-\(--([a-z-]+)\)/g, "outline-$1"],
+    [/shadow-\(--([a-z-]+)\)/g, "shadow-$1"],
+    [/fill-\(--([a-z-]+)\)/g, "fill-$1"],
+    [/stroke-\(--([a-z-]+)\)/g, "stroke-$1"],
+    [/placeholder-\(--([a-z-]+)\)/g, "placeholder-$1"],
+    [/divide-\(--([a-z-]+)\)/g, "divide-$1"],
+    [/accent-\(--([a-z-]+)\)/g, "accent-$1"],
+    [/caret-\(--([a-z-]+)\)/g, "caret-$1"],
+    [/decoration-\(--([a-z-]+)\)/g, "decoration-$1"],
+
     // Compound foreground classes (must come before base classes)
     [/ring-offset-background/g, "ring-offset-slate-950"],
     [/text-destructive-foreground/g, "text-white"],
@@ -1615,9 +1657,36 @@ function sanitizeTailwindCss(content: string): string {
 }
 
 export function sanitizePreviewFile(path: string, content: string): string {
+  // Normalize all line endings to standard \n (LF) to prevent OS-specific regex failures on Windows (\r\n)
+  let fixed = content.replace(/\r\n/g, "\n");
+
   // 0. Invisible Character Strip (Pure Root Purge)
   // Strips BOM, zero-width spaces, and other invisible control characters at the start
-  let fixed = content.replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF\u00A0\s]+/, "");
+  fixed = fixed.replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF\u00A0\s]+/, "");
+
+  // 0.3. NEXT.CONFIG.TS GUARD (Nuclear Config Protection)
+  // The AI frequently generates broken next.config.ts with hallucinated syntax:
+  //   - Triple/double quotes: protocol: "https""", hostname: "images.unsplash.com" }",
+  //   - Broken object literals: missing commas, extra braces, invalid JS
+  // Since next.config.ts is a critical boot file, ANY syntax error kills the build.
+  // Strategy: If the file looks broken, replace it entirely with the canonical version.
+  if (/^next\.config\.(ts|mjs|js)$/.test(path)) {
+    const hasBrokenQuotes = /"{2,}/.test(fixed) || /'{2,}/.test(fixed); // consecutive quotes
+    const hasTrailingQuoteBrace = /}"/.test(fixed); // orphan quote after brace
+    const hasUnbalancedBraces = (() => {
+      let depth = 0;
+      for (const ch of fixed) {
+        if (ch === '{') depth++;
+        if (ch === '}') depth--;
+        if (depth < 0) return true;
+      }
+      return depth !== 0;
+    })();
+    if (hasBrokenQuotes || hasTrailingQuoteBrace || hasUnbalancedBraces) {
+      console.log(`[sanitize] 🛡️ next.config.ts has broken syntax (quotes=${hasBrokenQuotes}, trailingQuoteBrace=${hasTrailingQuoteBrace}, unbalancedBraces=${hasUnbalancedBraces}) — replacing with canonical version`);
+      return CANONICAL_NEXT_CONFIG_TS;
+    }
+  }
 
   // 0.5. The Unescape Protocol (Nuclear Option)
   // Detects if the AI outputted literal escape sequences (e.g. \n as two characters) instead of actual newlines.
@@ -1769,9 +1838,311 @@ export function sanitizePreviewFile(path: string, content: string): string {
   // 4. Syntax Slur Guard (Hallucination Cleanup)
   if (/\.(tsx?|jsx?)$/.test(path)) {
     // Fix: onClick={() => handleOperation('/')'} -> remove trailing quote
-    fixed = fixed.replace(/(\([^)]*\))['"]/g, "$1");
+    fixed = fixed.replace(/(\([^)]*\))['"](?=[}\s;,])/g, "$1");
     // Fix: prop='value'' -> remove double trailing quote
     fixed = fixed.replace(/=(['"])([^'"]+)\1['"]/g, "=$1$2$1");
+
+    // ═══ FIX 4.1: CONSECUTIVE QUOTE COLLAPSE (Root cause of "Parsing ecmascript source code failed") ═══
+    // The LLM frequently hallucinates runs of 3+ consecutive quotes inside string values:
+    //   { label: "All""""", value: "all" }""",     → should be { label: "All", value: "all" },
+    //   { label: "Active""""", value: "active" }""", → should be { label: "Active", value: "active" },
+    // Pattern: A properly quoted string value followed by 2+ extra quotes.
+    // Strategy: Collapse any run of 2+ consecutive same-type quotes down to exactly 1,
+    // EXCEPT inside template literals and regex patterns.
+    
+    // Phase A: Collapse runs of 3+ consecutive double-quotes to just 1
+    // e.g. "All""""" → "All"    "active"""" → "active"
+    fixed = fixed.replace(/"{3,}/g, '"');
+    
+    // Phase B: Collapse runs of 3+ consecutive single-quotes to just 1
+    fixed = fixed.replace(/'{3,}/g, "'");
+    
+    // Phase C: Fix trailing garbage quotes after closing braces/brackets/parens
+    // e.g.  }"""  →  }       ]"""  →  ]       )"""  →  )
+    fixed = fixed.replace(/([}\])])["']{2,}/g, "$1");
+    
+    // Phase D: Fix double-quote pairs that create empty strings adjacent to real values
+    // e.g.  "all" }""",  →  "all" },
+    // This catches: quote, optional whitespace, closing brace/bracket, quote(s), comma
+    fixed = fixed.replace(/(["'])\s*([}\]])\s*["']{1,}\s*,/g, "$1 $2,");
+    
+    // Phase E: Fix double-double-quote pairs inside object values
+    // e.g.  "All""  →  "All"   (only when followed by comma, closing brace, or whitespace)
+    fixed = fixed.replace(/(['"])([^'"\\]*?)\1{2,}(?=[\s,}\])])/g, "$1$2$1");
+    
+    // Phase F: DIRECT double-quote collapse (belt-and-suspenders for Phase E)
+    // Catches the most common LLM pattern: "value"" → "value"
+    // This simple regex doesn't use backreference quantifiers, so it's 100% reliable.
+    // e.g.: { id: "home"", label: "Home" }  →  { id: "home", label: "Home" }
+    // e.g.: { id: "story"", label: "Our Story" }  →  { id: "story", label: "Our Story" }
+    fixed = fixed.replace(/(\w)""(?=\s*[,}\])])/g, '$1"');
+    fixed = fixed.replace(/(\w)''(?=\s*[,}\])])/g, "$1'");
+
+    // Phase G: Fix closing delimiters TRAPPED inside strings (empty string lost during JSON extraction)
+    // Root cause: AI generates "" (empty string) in ternary else-branch or similar.
+    // In JSON, "" is \"\". During broken JSON extraction, \"\" gets mangled and the
+    // closing delimiters ); or )} that follow get swallowed INTO the string.
+    // e.g.: wide ? "col-span-2" : ")}"   →   wide ? "col-span-2" : "")}
+    // e.g.: ok ? "text-sm" : ");"        →   ok ? "text-sm" : "");
+    // Detection: After a ternary colon, a string whose content is ONLY closing delimiters.
+    {
+      const beforeG = fixed;
+      // Universal operator-level double-quote repair
+      fixed = fixed.replace(/(\?\?|\|\||&&|:|=>|,|=)\s*"([)}\];,\s]{1,5})"\s*$/gm, '$1 ""$2');
+      // Universal operator-level single-quote repair
+      fixed = fixed.replace(/(\?\?|\|\||&&|:|=>|,|=)\s*'([)}\];,\s]{1,5})'\s*$/gm, "$1 ''$2");
+      if (fixed !== beforeG) {
+        console.log(`[sanitize] 🩹 Repaired closing delimiters trapped inside string in ${path}`);
+      }
+    }
+
+    // Phase H: Mangled array string quotes repair (Framer Motion color array root fix)
+    // The LLM often hallucinates quotes inside array mappings, especially for colors:
+    //   ["rgba(2, 6, 23, 0), "rgba(2, 6, 23, 0.95)"]"  ➔  ["rgba(2, 6, 23, 0)", "rgba(2, 6, 23, 0.95)"]
+    //   ['rgba(2, 6, 23, 0), 'rgba(2, 6, 23, 0.95)']'  ➔  ['rgba(2, 6, 23, 0)', 'rgba(2, 6, 23, 0.95)']
+    {
+      const beforeH = fixed;
+      fixed = fixed.replace(/\[\s*"([^"]+),\s*"([^"]+)"?\s*\]\s*"/g, '["$1", "$2"]');
+      fixed = fixed.replace(/\[\s*'([^']+),\s*'([^']+)'?\s*\]\s*'/g, "['$1', '$2']");
+      if (fixed !== beforeH) {
+        console.log(`[sanitize] 🩹 Repaired mangled array string quotes in ${path}`);
+      }
+    }
+  }
+
+  // Phase I: Clean up orphan double/single quotes on numbers and keys (fixes percentage: 42" and prefix = ", suffix = "")
+  if (/\.(tsx?|jsx?)$/.test(path)) {
+    const beforeI = fixed;
+    const lines = fixed.split("\n");
+    let repairedI = false;
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i];
+      const trimmed = line.trim();
+      if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) continue;
+
+      // Repair Pattern I-A: key: 42",  or key: 42', (orphan quote on digit in object)
+      line = line.replace(/(["']?\w+["']?\s*:\s*)(\d+)["'](?=\s*[,}])/g, "$1$2");
+
+      // Repair Pattern I-B: key: "42,  or key: '42, (orphan leading quote on digit in object)
+      line = line.replace(/(["']?\w+["']?\s*:\s*)["'](\d+)(?=\s*[,}])/g, "$1$2");
+
+      // Repair Pattern I-C: prefix = ",  ➔ prefix = "",  (orphan empty string quotes in assignments/parameters)
+      line = line.replace(/(["']?\w+["']?\s*=\s*)["'](?=\s*[,}])/g, '$1""');
+
+      // Repair Pattern I-D: orphan trailing quote after closing brace/bracket at end of line (like }", or }')
+      line = line.replace(/([}\])])\s*["'](?=\s*[,;]|$)/g, "$1");
+      line = line.replace(/([{}])["']\s*$/g, "$1");
+
+      if (line !== lines[i]) {
+        lines[i] = line;
+        repairedI = true;
+      }
+    }
+    if (repairedI) {
+      console.log(`[sanitize] 🩹 Repaired orphan quotes on numbers/keys in ${path}`);
+      fixed = lines.join("\n");
+    }
+  }
+
+  // 4.5. UNTERMINATED STRING REPAIR (Root cause fix for broken JSON repair)
+  // When the AI's JSON response is truncated mid-string, the regex-based repair
+  // extracts files whose content ends with unclosed string literals, e.g.:
+  //   background: "rgba(24, 24, 27, 0.95),
+  //   border: "1px solid rgba(255, 215, 0, 0.15),
+  // This produces a fatal "Unterminated string constant" / "Parsing ecmascript source code failed".
+  // We detect and close these broken strings BEFORE deployment.
+  if (/\.(tsx?|jsx?)$/.test(path)) {
+    const lines = fixed.split("\n");
+    let repaired = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // Skip comment lines, template literals, and JSX text
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) continue;
+
+      // Count unescaped double quotes outside of template literals
+      // A line like:  background: "rgba(24, 24, 27, 0.95),  has 1 unescaped "
+      // A correct line: background: "rgba(24, 24, 27, 0.95)",  has 2 unescaped "
+      let doubleQuoteCount = 0;
+      let singleQuoteCount = 0;
+      let inTemplate = false;
+      for (let j = 0; j < line.length; j++) {
+        const ch = line[j];
+        const prev = j > 0 ? line[j - 1] : "";
+        if (ch === "`") { inTemplate = !inTemplate; continue; }
+        if (inTemplate) continue;
+        if (ch === '"' && prev !== "\\") doubleQuoteCount++;
+        if (ch === "'" && prev !== "\\") singleQuoteCount++;
+      }
+
+      // If odd number of double quotes on a property/style line → string is unterminated
+      if (doubleQuoteCount % 2 !== 0) {
+        // This is likely a truncated string. Close it.
+        // Pattern: `something: "value...` → `something: "value..."`
+        // or `something: "value...,` → `something: "value...",`
+        const trailingComma = line.trimEnd().endsWith(",");
+        if (trailingComma) {
+          lines[i] = line.trimEnd().slice(0, -1) + '",';
+        } else {
+          lines[i] = line.trimEnd() + '"';
+        }
+        repaired = true;
+      }
+      // Same for single quotes
+      if (singleQuoteCount % 2 !== 0) {
+        const trailingComma = line.trimEnd().endsWith(",");
+        if (trailingComma) {
+          lines[i] = line.trimEnd().slice(0, -1) + "',";
+        } else {
+          lines[i] = line.trimEnd() + "'";
+        }
+        repaired = true;
+      }
+    }
+    if (repaired) {
+      console.log(`[sanitize] 🩹 Repaired unterminated string literal(s) in ${path}`);
+      fixed = lines.join("\n");
+    }
+  }
+
+  // 4.55. MANGLED EMPTY STRING / UNCLOSED HOOK CALL REPAIR
+  // MUST run BEFORE 4.6 (truncated file repair) so that paren balance is correct.
+  // When the AI's tool call JSON is malformed, regex-based extraction mangles
+  // empty string arguments in useState/useRef/etc.:
+  //   Case A: useState<string>(""     ← truncated mid-call, repair closed quote but left call open
+  //   Case B: useState<string>(");"   ← "" eaten during extraction, ); swallowed into string
+  // Both produce an unmatched open paren that 4.6 would "fix" by appending ); at EOF,
+  // creating a stale "); Expression expected" error on the last line.
+  // Fix: Close the function call properly BEFORE 4.6 counts parens.
+  if (/\.(tsx?|jsx?)$/.test(path)) {
+    const beforeMangled = fixed;
+    // Case A: Unclosed hook call with empty string at end of line
+    // e.g.: useState<string>(""   →  useState<string>("");
+    fixed = fixed.replace(
+      /\b((?:use\w+|set\w+)(?:<[^>]+>)?)\s*\(\s*""\s*$/gm,
+      '$1("");'
+    );
+    // Case B: Hook call where ); got swallowed into the string
+    // e.g.: useState<string>(");"  →  useState<string>("");
+    fixed = fixed.replace(
+      /\b((?:use\w+|set\w+)(?:<[^>]+>)?)\s*\(\s*"([)};,\s]{1,8})"\s*$/gm,
+      '$1("");'
+    );
+    // Single-quoted variants
+    fixed = fixed.replace(
+      /\b((?:use\w+|set\w+)(?:<[^>]+>)?)\s*\(\s*''\s*$/gm,
+      "$1('');"
+    );
+    fixed = fixed.replace(
+      /\b((?:use\w+|set\w+)(?:<[^>]+>)?)\s*\(\s*'([)};,\s]{1,8})'\s*$/gm,
+      "$1('');"
+    );
+    if (fixed !== beforeMangled) {
+      console.log(`[sanitize] 🩹 Repaired mangled empty string argument(s) in ${path}`);
+    }
+  }
+
+  // 4.6. TRUNCATED FILE REPAIR (Safety net for AI JSON truncation)
+  // When the AI's response is cut off, the last file may be missing closing braces.
+  // We detect the brace imbalance and append missing closers.
+  if (/\.(tsx?|jsx?)$/.test(path)) {
+    let braceBalance = 0;
+    let parenBalance = 0;
+    let inString = false;
+    let stringChar = "";
+    for (let i = 0; i < fixed.length; i++) {
+      const ch = fixed[i];
+      const prev = i > 0 ? fixed[i - 1] : "";
+      if (inString) {
+        if (ch === stringChar && prev !== "\\") inString = false;
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === "`") { inString = true; stringChar = ch; continue; }
+      if (ch === "{") braceBalance++;
+      if (ch === "}") braceBalance--;
+      if (ch === "(") parenBalance++;
+      if (ch === ")") parenBalance--;
+    }
+    if (braceBalance > 0 || parenBalance > 0) {
+      let suffix = "";
+      // Close open parens first (inner), then braces (outer)
+      for (let i = 0; i < parenBalance; i++) suffix += ")";
+      if (suffix) suffix += ";";
+      suffix += "\n";
+      for (let i = 0; i < braceBalance; i++) suffix += "}\n";
+      fixed = fixed.trimEnd() + "\n" + suffix;
+      console.log(`[sanitize] 🩹 Repaired truncated file ${path}: closed ${braceBalance} braces, ${parenBalance} parens`);
+    }
+  }
+
+  // 4.7. NESTED QUOTE REPAIR (Style object collision fix)
+  // The AI generates style objects with nested/colliding double quotes:
+  //   style={{ transform: "scale(1.1), transformOrigin: "center bottom" }}
+  // The inner "center bottom" breaks the outer string literal.
+  // Section 4.5 misses this because the total quote count per line is even (4 quotes).
+  // This section specifically finds and repairs these collisions.
+  if (/\.(tsx?|jsx?)$/.test(path)) {
+    const nqLines = fixed.split("\n");
+    let nestedQuoteRepaired = false;
+    for (let i = 0; i < nqLines.length; i++) {
+      const line = nqLines[i];
+      const trimmed = line.trimStart();
+      // Skip comment lines
+      if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) continue;
+
+      let fixedLine = line;
+
+      // Pattern 1: Detect colliding quotes in style/object lines
+      // e.g.: transform: "scale(1.1), transformOrigin: "center bottom"
+      // This has the pattern: "..., key: "value"  — a comma-separated key:value inside a string
+      const collidingQuotePattern = /"([^"\\]+),\s*([a-zA-Z]+):\s*"([^"]*)"(\s*)/g;
+      let collidingMatch;
+      while ((collidingMatch = collidingQuotePattern.exec(line)) !== null) {
+        const before = collidingMatch[1]; // scale(1.1)
+        const key = collidingMatch[2];     // transformOrigin
+        const value = collidingMatch[3];   // center bottom
+        const after = collidingMatch[4];
+        const replacement = `"${before}", ${key}: "${value}"${after}`;
+        fixedLine = fixedLine.replace(collidingMatch[0], replacement);
+        nestedQuoteRepaired = true;
+      }
+
+      // Pattern 2: Orphan trailing quote after JSX closing
+      // e.g.: } : undefined}" → } : undefined}
+      if (/\}\s*:\s*undefined\}"/.test(fixedLine)) {
+        fixedLine = fixedLine.replace(/\}\s*:\s*undefined\}"/, "} : undefined}");
+        nestedQuoteRepaired = true;
+      }
+
+      // Pattern 3: Direct nested quotes where a style prop has >4 non-escaped double quotes
+      if (!nestedQuoteRepaired && /style\s*=\s*\{/.test(fixedLine)) {
+        let dqCount = 0;
+        let inTpl = false;
+        for (let j = 0; j < fixedLine.length; j++) {
+          const ch = fixedLine[j];
+          const prev = j > 0 ? fixedLine[j - 1] : "";
+          if (ch === "`") { inTpl = !inTpl; continue; }
+          if (inTpl) continue;
+          if (ch === '"' && prev !== "\\") dqCount++;
+        }
+        if (dqCount > 4) {
+          const nestedPattern = /"([^"]*),\s*(\w+):\s*"([^"]*)"/g;
+          let nm;
+          while ((nm = nestedPattern.exec(fixedLine)) !== null) {
+            fixedLine = fixedLine.replace(nm[0], `"${nm[1]}", ${nm[2]}: "${nm[3]}"`);
+            nestedQuoteRepaired = true;
+          }
+        }
+      }
+
+      if (fixedLine !== line) {
+        nqLines[i] = fixedLine;
+      }
+    }
+    if (nestedQuoteRepaired) {
+      console.log(`[sanitize] 🩹 Repaired nested/colliding quotes in style objects in ${path}`);
+      fixed = nqLines.join("\n");
+    }
   }
 
   if (/\.(tsx?|jsx?|css|scss|mjs)$/.test(path)) {
@@ -2140,24 +2511,7 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
   for (const variant of ["next.config.ts", "next.config.mjs", "next.config.js"]) {
     delete files[variant];
   }
-  files["next.config.ts"] = `import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  reactStrictMode: true,
-  typescript: { ignoreBuildErrors: true },
-  eslint: { ignoreDuringBuilds: true },
-  serverExternalPackages: ["@prisma/client"],
-  images: {
-    remotePatterns: [
-      { protocol: "https", hostname: "images.unsplash.com" },
-      { protocol: "https", hostname: "source.unsplash.com" },
-      { protocol: "https", hostname: "images.pexels.com" },
-    ],
-  },
-};
-
-export default nextConfig;
-`;
+  files["next.config.ts"] = CANONICAL_NEXT_CONFIG_TS;
 
   files["postcss.config.mjs"] = `export default {\n  plugins: {\n    "@tailwindcss/postcss": {},\n  },\n};\n`;
 

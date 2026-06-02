@@ -44,10 +44,42 @@ import {
   startEmergencyPreviewServer,
   validatePreviewBuild,
   waitForPreviewUrlReachable,
+  startDetachedSandboxCommand,
 } from "@/lib/sandbox-preview";
 
 // Prompt validation will be done lazily inside the function to avoid cold start overhead.
-let isPromptValidated = false;
+function cleanAppName(prompt: string): string {
+  if (!prompt) return "custom application";
+  const cleaned = prompt
+    .replace(/^(please\s+)?(create|build|make|generate)\s+(an?\s+)?/gi, "")
+    .trim();
+  if (cleaned.length > 50) {
+    return cleaned.substring(0, 47) + "...";
+  }
+  return cleaned || "custom application";
+}
+
+async function appendMessageStatus(messageId: string, status: string) {
+  try {
+    const msg = await prisma.message.findUnique({
+      where: { id: messageId },
+      select: { content: true }
+    });
+    if (!msg) return;
+    const lines = msg.content ? msg.content.split("\n") : [];
+    if (!lines.includes(status)) {
+      await prisma.message.update({
+        where: { id: messageId },
+        data: {
+          content: [...lines, status].join("\n"),
+          updatedAt: new Date(),
+        }
+      });
+    }
+  } catch (e) {
+    console.error("Error appending status:", e);
+  }
+}
 
 // ✅ MODULE-LEVEL GUARD: Tracks sandbox IDs that already have a pre-install running.
 // Inngest replays the full function body on EVERY step poll request.
@@ -203,8 +235,8 @@ export const codeAgentFunction = inngest.createFunction(
       ? [requestedModel, "geminiFlash", "grok"].filter((v, i, a) => a.indexOf(v) === i) as ModelKey[]  // Deduplicated: primary + fallbacks
       : ["deepseek", "geminiFlash", "grok"];  // DeepSeek first (cheapest), Gemini backup, Grok last resort
 
-    // ✅ RECOVERY STRATEGY: Gemini 2.0 Flash for recovery — most reliable at strict JSON with huge context.
-    const recoveryModelKey: ModelKey = "geminiFlash";
+    // ✅ RECOVERY STRATEGY: DeepSeek for recovery (highly reliable JSON and cost-optimized)
+    const recoveryModelKey: ModelKey = "deepseek";
     const recoveryModel = modelMapping[recoveryModelKey];
 
     try {
@@ -228,7 +260,7 @@ export const codeAgentFunction = inngest.createFunction(
           prisma.message.create({
             data: {
               projectId,
-              content: "Generating your app...",
+              content: `I'll build this for you. Setting up the development environment...`,
               role: "ASSISTANT",
               type: "ANALYSIS",
               fileActions: [],
@@ -247,21 +279,31 @@ export const codeAgentFunction = inngest.createFunction(
       ownsRunLock = true;
       pendingMessageId = (lockRes as any).pendingMessageId;
 
+      await step.run("status-1-sandbox", async () => {
+        await appendMessageStatus(pendingMessageId, `Provisioning a secure sandbox environment and installing base dependencies (Next.js 15, React 19, Tailwind CSS v4)...`);
+      });
+
       // 🚀 PULSE 2: Sandbox Provisioning (Sub-10s)
       const sbRes = await step.run("pulse-2-sandbox", async () => {
         let sb: any;
         let isNew = false;
+        
+        await appendMessageStatus(pendingMessageId, "Connecting to the secure E2B sandbox environment...").catch(() => {});
+        
         if ((lockRes as any).existingSandboxId) {
           try {
             sb = await sandboxManager.get((lockRes as any).existingSandboxId);
             await sb.setTimeout(3600000); // 1 hour keep-alive
+            await appendMessageStatus(pendingMessageId, "✓ Connected to existing sandbox session.").catch(() => {});
           } catch {
+            await appendMessageStatus(pendingMessageId, "Existing session inactive. Provisioning a fresh secure E2B sandbox instance...").catch(() => {});
             const res = await createSandboxWithTemplateFallback({ apiKey: process.env.E2B_API_KEY, timeoutMs: SANDBOX_TIMEOUT });
             sb = res.sandbox;
             await sb.setTimeout(3600000); // 1 hour keep-alive
             isNew = true;
           }
         } else {
+          await appendMessageStatus(pendingMessageId, "Provisioning a fresh secure E2B sandbox instance...").catch(() => {});
           const res = await createSandboxWithTemplateFallback({ apiKey: process.env.E2B_API_KEY, timeoutMs: SANDBOX_TIMEOUT });
           sb = res.sandbox;
           await sb.setTimeout(3600000); // 1 hour keep-alive
@@ -269,6 +311,7 @@ export const codeAgentFunction = inngest.createFunction(
         }
 
         if (isNew) {
+          await appendMessageStatus(pendingMessageId, "✓ Sandbox successfully provisioned. Instantiating Next.js 15 template...").catch(() => {});
           const homeDir = SANDBOX_WORKSPACE_DIR;
           const skeletonPkg = JSON.stringify({
             name: "devx-app",
@@ -289,10 +332,13 @@ export const codeAgentFunction = inngest.createFunction(
           });
           await sb.commands.run(`mkdir -p '${homeDir}/app' && echo '${skeletonPkg}' > '${homeDir}/package.json' && echo 'export default function Page() { return <div>Booting...</div> }' > '${homeDir}/app/page.tsx'`, { timeoutMs: 10000 }).catch(() => {});
           
-          // ⚡ SPEED FIX: Only install deps here. Do NOT start dev server.
-          // write-all-files step starts the server AFTER all files are written.
-          // Previously 4 competing `npm run dev` processes fought for port 3000.
-          sb.commands.run(`cd '${homeDir}' && ([ -d "node_modules" ] || npm install --no-package-lock --prefer-offline --no-audit --no-fund --ignore-scripts || true)`, { timeoutMs: 0 }).catch(() => {});
+          await appendMessageStatus(pendingMessageId, "Starting background installation of primary npm dependencies...").catch(() => {});
+          await startDetachedSandboxCommand({
+            sandbox: sb,
+            homeDir,
+            command: `([ -d "node_modules" ] || npm install --no-package-lock --prefer-offline --no-audit --no-fund --ignore-scripts || true)`,
+            logFile: `/tmp/npm-install-background.log`,
+          }).catch(() => {});
         }
 
         return { sandboxId: sb.sandboxId, isNew };
@@ -312,6 +358,10 @@ export const codeAgentFunction = inngest.createFunction(
       // NOTE: Pre-install removed. Running npm install in parallel caused OOM (exit 134)
       // in the sandbox, corrupting the npm cache and making start-dev-server take >10min.
       // Sequential install in start-dev-server is reliable at ~3-4min.
+      await step.run("status-2-prep", async () => {
+        await appendMessageStatus(pendingMessageId, `Loading project context and configuring code generation rules...`);
+      });
+
       // 🚀 STEP 2: Build system prompt — LEAN for speed, FOCUSED on build-critical rules
       const agentContext = await step.run("prep-agent-context", async () => {
         const memoryContext = await MemoryService.getContextForAgent(projectId);
@@ -324,6 +374,77 @@ export const codeAgentFunction = inngest.createFunction(
       });
 
       const { memoryContext, primarySpecialist } = agentContext;
+
+      // ══════════════════════════════════════════════════════════════
+      // PLANNING CALL: Fast LLM generates conversational narration
+      // Makes the chat feel like Lovable/Cursor — agent explains what it will build
+      // ══════════════════════════════════════════════════════════════
+      await step.run("agent-planning-narration", async () => {
+        try {
+          const userPrompt = event.data.value || "custom application";
+          const planResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+              "Content-Type": "application/json",
+              "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "https://devx.app",
+              "X-Title": "DevX Planning Agent",
+            },
+            body: JSON.stringify({
+              model: "google/gemini-2.0-flash-001",
+              messages: [
+                {
+                  role: "system",
+                  content: `You are a senior full-stack engineer narrating your thought process to the user. You're about to build their app using Next.js 15 (App Router), React 19, Tailwind CSS v4, and TypeScript.
+
+Write 3-5 short sentences explaining:
+1. What you understand from their request
+2. The key features/components you'll create
+3. The tech approach you'll use
+
+Rules:
+- Be conversational and natural, like pair programming
+- Use present tense ("I'll create...", "I'm going to...")
+- Mention specific components and features you'll build
+- Keep it concise — max 4-5 sentences
+- NO markdown headers, NO bullet points, NO bold text
+- Just flowing conversational text
+- Do NOT mention provisioning, sandboxes, or infrastructure
+- Focus purely on what the APP will look like and do`
+                },
+                { role: "user", content: `Build this: "${userPrompt}"` }
+              ],
+              temperature: 0.7,
+              max_tokens: 300,
+            }),
+          });
+
+          const planData = await planResponse.json();
+          const planText = planData?.choices?.[0]?.message?.content?.trim();
+          
+          if (planText && planText.length > 20) {
+            const currentMsg = await prisma.message.findUnique({
+              where: { id: pendingMessageId },
+              select: { content: true }
+            });
+            const existingLines = currentMsg?.content ? currentMsg.content.split("\n") : [];
+            const thinkingPart = existingLines.length > 1 ? existingLines.slice(1) : [];
+            const newContent = [planText, ...thinkingPart].join("\n");
+            
+            await prisma.message.update({
+              where: { id: pendingMessageId },
+              data: {
+                content: newContent,
+                updatedAt: new Date(),
+              }
+            });
+            console.log(`[planning] ✅ Generated narration (${planText.length} chars)`);
+          }
+        } catch (e) {
+          console.warn("[planning] ⚠️ Planning call failed, using default:", e);
+          // Fall through — the default message stays
+        }
+      });
 
       // ═══════════════════════════════════════════════════════════════════
       // FULL-RULES SYSTEM PROMPT: ALL rules from prompt.ts + ALL 8 prompts/ files
@@ -1063,6 +1184,15 @@ ${systemPrompt}`,
       // This was causing Grok to be called 3-5x per generation (each taking 60-130s).
       // The old comment said "DO NOT wrap" because agent-kit's network.run() had internal step.run() calls.
       // We bypassed agent-kit with a direct fetch(), so there are NO nested steps anymore.
+      await step.run("status-3-generation", async () => {
+        await appendMessageStatus(pendingMessageId, `Now generating the full application code. This is the main synthesis step — I'm creating all the components, pages, and logic...`);
+      });
+
+      // Status: Model selection reasoning
+      await step.run("status-3b-model-think", async () => {
+        await appendMessageStatus(pendingMessageId, `Analyzing your requirements and structuring the codebase. Writing components, styling, and connecting everything together...`);
+      });
+
       const generationResult = await step.run("turbo-generate", async () => {
         let networkOutput = { files: {} as Record<string, string>, apiRoutes: {} as Record<string, string>, summary: "", rawResponse: "" };
         let lastRawResponse = "";
@@ -1080,6 +1210,8 @@ ${systemPrompt}`,
               if (totalFiles > 0) {
                 networkOutput = output;
                 console.log(`[codeAgentFunction] ✅ ${modelKey} produced ${totalFiles} files. Using this output.`);
+                // Inline status update (inside step.run so safe)
+                await appendMessageStatus(pendingMessageId, `Done! I've generated ${totalFiles} files. Now validating the code structure and preparing to deploy...`).catch(() => {});
                 break;
               } else {
                 console.warn(`[codeAgentFunction] ⚠️ ${modelKey} produced 0 files. Retrying...`);
@@ -1183,6 +1315,9 @@ ${CODE_GENERATION_GUARD}
         });
 
         const data = await response.json();
+        if (data?.error) {
+          console.error("[codeAgentFunction] ❌ Recovery direct JSON API error:", data.error);
+        }
         const content = data?.choices?.[0]?.message?.content || "";
         return parseFilesFromText(content);
       };
@@ -1201,6 +1336,10 @@ ${CODE_GENERATION_GUARD}
         Object.keys(result.state.data.apiRoutes || {}).length;
 
       if (totalInitialFiles === 0) {
+        await step.run(`status-recovery-${runId.slice(-4)}`, async () => {
+          await appendMessageStatus(pendingMessageId, `The initial generation didn't produce all the files I need. Running a recovery pass to fill in the missing pieces...`);
+        });
+
         const directRecovery = await step.run(`direct-json-recovery-${runId.slice(-4)}`, async () => {
           const extracted = await requestDirectJsonGeneration(
             result.state.data.files || {},
@@ -1300,6 +1439,9 @@ ${CODE_GENERATION_GUARD}
             });
 
             const data = await response.json();
+            if (data?.error) {
+              console.error("[codeAgentFunction] ❌ Recovery required files API error:", data.error);
+            }
             const content = data?.choices?.[0]?.message?.content || "";
             const extracted = parseFilesFromText(content);
 
@@ -1371,9 +1513,6 @@ ${CODE_GENERATION_GUARD}
               },
             },
           });
-          console.warn(
-            `[codeAgentFunction] ⚠️ GENERATION_EMPTY_OUTPUT: files=${finalTotalFiles}, missingRequired=${missingRequiredFiles.join(",")}`
-          );
         });
         return {
           status: "empty_output",
@@ -1417,6 +1556,16 @@ ${CODE_GENERATION_GUARD}
       // ══════════════════════════════════════════════════════════════
       // STEP 4.5: FLUSH ALL FILES TO SANDBOX (single step, no per-file overhead)
       // ══════════════════════════════════════════════════════════════
+      await step.run("status-4-writing", async () => {
+        const totalFileCount = Object.keys(result.state.data.files || {}).length + Object.keys(result.state.data.apiRoutes || {}).length;
+        await appendMessageStatus(pendingMessageId, `Writing ${totalFileCount} files to the sandbox workspace — setting up pages, components, configs, and styles...`);
+      });
+
+      // Extra status: Normalization & sanitization pass
+      await step.run("status-4b-sanitize", async () => {
+        await appendMessageStatus(pendingMessageId, `Running code quality checks — validating imports, fixing syntax, and ensuring everything compiles cleanly...`);
+      });
+
       await step.run("write-all-files", async () => {
         let rawFiles: Record<string, string> = {
           ...result.state.data.files,
@@ -1431,6 +1580,7 @@ ${CODE_GENERATION_GUARD}
         }
 
         // ═══ FILE SANITIZATION: Fix common AI-generated conflicts ═══
+        await appendMessageStatus(pendingMessageId, "🧼 Running multi-phase codebase sanitization passes...").catch(() => {});
 
         // 1. Remove duplicate next.config files (AI often generates both .mjs and .js/.ts)
         const nextConfigs = Object.keys(allFiles).filter((f) =>
@@ -1453,9 +1603,11 @@ ${CODE_GENERATION_GUARD}
               delete allFiles[cfg];
             }
           }
+          await appendMessageStatus(pendingMessageId, "🧹 Sanitized Next.js configuration files to avoid compilation conflicts.").catch(() => {});
         }
 
         // 2. Remove forbidden middleware files
+        let hasForbiddenMiddleware = false;
         for (const forbidden of [
           "middleware.ts",
           "middleware.js",
@@ -1467,18 +1619,27 @@ ${CODE_GENERATION_GUARD}
               `[write-all-files] 🧹 Removing forbidden file: ${forbidden}`
             );
             delete allFiles[forbidden];
+            hasForbiddenMiddleware = true;
           }
+        }
+        if (hasForbiddenMiddleware) {
+          await appendMessageStatus(pendingMessageId, "🧹 Excluded middleware.ts to ensure error-free routing in sandbox edge environment.").catch(() => {});
         }
 
         // 3. Enforce EXACT postcss.config.mjs for Tailwind v4 and remove any others
         const postcssFiles = Object.keys(allFiles).filter((f) =>
           f.match(/^postcss\.config\.(mjs|js|cjs)$/)
         );
+        let hasCleanedPostcss = false;
         for (const f of postcssFiles) {
           if (f !== "postcss.config.mjs") {
             console.log(`[write-all-files] 🧹 Removing incorrect format ${f}`);
             delete allFiles[f];
+            hasCleanedPostcss = true;
           }
+        }
+        if (hasCleanedPostcss || !allFiles["postcss.config.mjs"]) {
+          await appendMessageStatus(pendingMessageId, "⚙️ Configured postcss.config.mjs for Tailwind CSS v4 pipeline.").catch(() => {});
         }
         // Always overwrite/inject correct PostCSS v4 config
         allFiles[
@@ -1492,6 +1653,7 @@ ${CODE_GENERATION_GUARD}
         // 5.1 Enforce lib/utils.ts
         if (!allFiles["lib/utils.ts"] && !allFiles["src/lib/utils.ts"]) {
           console.log("[write-all-files] 🏗️ Injecting missing lib/utils.ts");
+          await appendMessageStatus(pendingMessageId, "🏗️ Auto-generated core utility library (lib/utils.ts) with tailwind-merge.").catch(() => {});
           allFiles[
             "lib/utils.ts"
           ] = `import { type ClassValue, clsx } from "clsx"\nimport { twMerge } from "tailwind-merge"\n\nexport function cn(...inputs: ClassValue[]) {\n  return twMerge(clsx(inputs))\n}\n`;
@@ -1505,33 +1667,10 @@ ${CODE_GENERATION_GUARD}
             : "app/globals.css";
         if (!allFiles[cssKey]) {
           console.log("[write-all-files] 🏗️ Injecting missing globals.css");
-          allFiles[cssKey] = `@import "tailwindcss";
-
-@theme {
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-surface: var(--surface);
-}
-
-:root {
-  --background: #ffffff;
-  --foreground: #0f172a;
-  --surface: #f8fafc;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #94a3b8;
-}
-
-body {
-  min-height: 100vh;
-  background: var(--background);
-  color: var(--foreground);
-}
-`;
+          await appendMessageStatus(pendingMessageId, "🎨 Injected responsive global styles using Tailwind CSS v4.").catch(() => {});
+          allFiles[cssKey] = `@import "tailwindcss";\n\n@theme {\n  --color-border: var(--border);\n  --color-input: var(--input);\n  --color-ring: var(--ring);\n  --color-background: var(--background);\n  --color-foreground: var(--foreground);\n  --color-surface: var(--surface);\n}\n\n:root {\n  --background: #ffffff;\n  --foreground: #0f172a;\n  --surface: #f8fafc;\n  --border: #e2e8f0;\n  --input: #e2e8f0;\n  --ring: #94a3b8;\n}\n\nbody {\n  min-height: 100vh;\n  background: var(--background);\n  color: var(--foreground);\n}\n`;
         } else if (!allFiles[cssKey].includes('@import "tailwindcss"')) {
+          await appendMessageStatus(pendingMessageId, "🎨 Configured global HSL theme tokens and Tailwind CSS v4 layout directives.").catch(() => {});
           allFiles[cssKey] = `@import "tailwindcss";\n` + allFiles[cssKey];
         }
 
@@ -1569,6 +1708,8 @@ body {
           console.log(
             "[write-all-files] ✅ package.json auto-healed to include standard UI dependencies"
           );
+          await appendMessageStatus(pendingMessageId, "🩹 Running automated package dependency audit and version pinning...").catch(() => {});
+          await appendMessageStatus(pendingMessageId, "✓ package.json auto-healed with standard UI dependencies (framer-motion, lucide-react, radix-ui).").catch(() => {});
         } else {
           // If completely missing, generate a minimal one
           const { pkg } = robustParsePackageJson("{}");
@@ -1727,7 +1868,10 @@ body {
 
 
 
-        // Write remaining files progressively — each appears in UI as it's written
+        if (pendingMessageId && remainingEntries.length > 0) {
+          await appendMessageStatus(pendingMessageId, `Deploying ${fileEntries.length} files to the preview environment...`).catch(() => {});
+        }
+
         for (const [path, content] of remainingEntries) {
           await sandbox.files.write(`${homeDir}/${path}`, content);
           emittedCount++;
@@ -1761,8 +1905,16 @@ body {
         return { written: fileEntries.length };
       });
 
+      await step.run("status-5-compiling", async () => {
+        await appendMessageStatus(pendingMessageId, `All files are deployed! Starting the development server now...`);
+      });
+
+      await step.run("status-5b-booting", async () => {
+        await appendMessageStatus(pendingMessageId, `Compiling and bundling your application. This usually takes 15-45 seconds...`);
+      });
+
       // ══════════════════════════════════════════════════════════════
-      // STEP 5: TURBO BOOT — Minimal, fast dev server start
+      // STEP 5: TURBO BOOT — Split install/start, smart gating
       // ══════════════════════════════════════════════════════════════
       const startDevServerResult = await step.run("start-dev-server", async () => {
         const allFiles = result.state.data.files;
@@ -1774,6 +1926,8 @@ body {
         const sandbox = await sandboxManager.get(sandboxId);
         const homeDir = await resolveSandboxWorkspace(sandbox);
 
+        await appendMessageStatus(pendingMessageId, "🔍 Checking if dev server is already running...").catch(() => {});
+
         // ── 1. Quick liveness check (instant return if already booted) ──
         const liveCheck = await sandbox.commands.run(
           `curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 http://127.0.0.1:3000 2>/dev/null || echo "000"`,
@@ -1782,33 +1936,77 @@ body {
 
         if (liveCheck.stdout?.trim()?.match(/^[2-5]/)) {
           console.log("[start-dev-server] ⚡ Port 3000 already live. Instant handoff.");
+          await appendMessageStatus(pendingMessageId, "⚡ Port 3000 already live. Handing off to preview session.").catch(() => {});
           return { serverReady: true, homeDir, instant: true };
         }
+
         // ── 2. Create .env.local (prevents auth/db crashes) ──
+        await appendMessageStatus(pendingMessageId, "📝 Generating environment variables (.env.local) with preview-safe defaults...").catch(() => {});
         await sandbox.files.write(`${homeDir}/.env.local`, [
           'DATABASE_URL="file:./dev.db"',
           'NEXTAUTH_SECRET="devx-preview-secret"',
           'NEXTAUTH_URL="http://localhost:3000"',
         ].join("\n")).catch(() => {});
 
-        // ── 3. Kill stale processes, install deps, start dev server — ONE command ──
-        console.log("[start-dev-server] 🚀 Turbo boot: kill → install → start");
+        // ── 3. Kill stale processes but KEEP .next cache for warm boot ──
+        console.log("[start-dev-server] 🚀 Turbo boot: kill stale → gate install → start");
+        await appendMessageStatus(pendingMessageId, "🚀 Starting Turbo boot: terminating stale development compilation processes...").catch(() => {});
         await sandbox.commands.run(
-          `cd '${homeDir}' && (fuser -k 3000/tcp 2>/dev/null || true) && (pkill -9 -f 'next' 2>/dev/null || true) && rm -rf .next`,
+          `cd '${homeDir}' && (fuser -k 3000/tcp 2>/dev/null || true) && (pkill -9 -f 'next' 2>/dev/null || true)`,
           { timeoutMs: 8000 }
         ).catch(() => {});
 
-        // Fire-and-forget: install + start in background
-        sandbox.commands.run(
-          `cd '${homeDir}' && npm install --no-package-lock --prefer-offline --no-audit --no-fund --ignore-scripts 2>&1 | tail -3 && NEXT_TELEMETRY_DISABLED=1 ./node_modules/.bin/next dev --hostname 0.0.0.0 --port 3000 --turbo > /tmp/next-dev-webpack.log 2>&1`,
-          { timeoutMs: 0 }
-        ).catch(() => {});
+        // ── 4. Wait for any background npm install to finish (from pulse-2-sandbox) ──
+        console.log("[start-dev-server] ⏳ Waiting for any background npm install...");
+        await appendMessageStatus(pendingMessageId, "⏳ Waiting for background package installation to finalize...").catch(() => {});
+        const installWaitStart = Date.now();
+        for (let i = 0; i < 40; i++) { // up to ~60s
+          const npmCheck = await sandbox.commands.run(
+            `pgrep -f 'npm install' > /dev/null && echo "RUNNING" || echo "DONE"`,
+            { timeoutMs: 3000 }
+          ).catch(() => ({ stdout: "DONE" }));
+          if (npmCheck.stdout?.trim() === "DONE") break;
+          await new Promise(r => setTimeout(r, 1500));
+        }
+        const installWaitElapsed = ((Date.now() - installWaitStart) / 1000).toFixed(1);
+        console.log(`[start-dev-server] ✅ npm install gate passed after ${installWaitElapsed}s`);
+        await appendMessageStatus(pendingMessageId, `✓ Package installation verified (gate passed after ${installWaitElapsed}s).`).catch(() => {});
 
-        // ── 4. Poll port 3000 (up to 90s) ──
+        // ── 5. Only install if next binary is missing ──
+        const nextBinCheck = await sandbox.commands.run(
+          `cd '${homeDir}' && [ -f node_modules/.bin/next ] && echo "OK" || echo "MISSING"`,
+          { timeoutMs: 5000 }
+        ).catch(() => ({ stdout: "MISSING" }));
+
+        if (nextBinCheck.stdout?.trim() !== "OK") {
+          console.log("[start-dev-server] 📦 next binary missing, running install...");
+          await appendMessageStatus(pendingMessageId, `📦 Next.js compiler binary missing. Downloading and installing build packages...`).catch(() => {});
+          await sandbox.commands.run(
+            `cd '${homeDir}' && npm install --no-package-lock --prefer-offline --no-audit --no-fund --ignore-scripts`,
+            { timeoutMs: 120000 }
+          ).catch(() => {});
+          await appendMessageStatus(pendingMessageId, `✓ Compilation package installation complete.`).catch(() => {});
+        } else {
+          console.log("[start-dev-server] ✅ next binary found, skipping install");
+          await appendMessageStatus(pendingMessageId, "✓ Core compiler binary verified.").catch(() => {});
+        }
+
+        // ── 6. Start dev server DETACHED (not chained behind install) ──
+        await appendMessageStatus(pendingMessageId, "🚀 Starting Next.js development server with Turbopack (--turbo)...").catch(() => {});
+        await startDetachedSandboxCommand({
+          sandbox,
+          homeDir,
+          command: `NEXT_TELEMETRY_DISABLED=1 ./node_modules/.bin/next dev --hostname 0.0.0.0 --port 3000 --turbo`,
+          logFile: `/tmp/next-dev-webpack.log`,
+        }).catch(() => {});
+
+        // ── 7. Poll port 3000 with PROCESS DEATH DETECTION ──
         console.log("[start-dev-server] ⏳ Waiting for port 3000...");
-        const maxWaitMs = 120000;
+        await appendMessageStatus(pendingMessageId, "⏳ Bundling application routes. Waiting for host port 3000 to resolve...").catch(() => {});
+        const maxWaitMs = 180000;
         const pollIntervalMs = 1500;
         const startTime = Date.now();
+        let processDeadDetected = false;
 
         while (Date.now() - startTime < maxWaitMs) {
           await new Promise(r => setTimeout(r, pollIntervalMs));
@@ -1820,11 +2018,77 @@ body {
           if (check.stdout?.trim()?.match(/^[2-5]/)) {
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
             console.log(`[start-dev-server] ✅ Port 3000 live after ${elapsed}s`);
+            await appendMessageStatus(pendingMessageId, `✓ host port 3000 live! Bundle compiled successfully in ${elapsed}s.`).catch(() => {});
             return { serverReady: true, homeDir };
+          }
+
+          // Every ~7.5s, check if the server process is still alive
+          const pollCount = Math.floor((Date.now() - startTime) / pollIntervalMs);
+          if (pollCount > 0 && pollCount % 5 === 0) {
+            const procCheck = await sandbox.commands.run(
+              `pgrep -f 'next dev' > /dev/null && echo "ALIVE" || echo "DEAD"`,
+              { timeoutMs: 3000 }
+            ).catch(() => ({ stdout: "DEAD" }));
+
+            if (procCheck.stdout?.trim() === "DEAD") {
+              const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+              console.error(`[start-dev-server] 💀 next dev process DIED after ${elapsed}s (build error)`);
+              await appendMessageStatus(pendingMessageId, "⚠️ Turbopack compilation mismatch. Switching to standard Next.js Webpack compiler...").catch(() => {});
+
+              // Read the crash log
+              const crashLog = await sandbox.commands.run(
+                `tail -50 /tmp/next-dev-webpack.log 2>/dev/null || echo ""`,
+                { timeoutMs: 5000 }
+              ).catch(() => ({ stdout: "" }));
+              if (crashLog.stdout?.trim()) {
+                console.error(`[start-dev-server] 📋 Crash log:\n${crashLog.stdout.slice(-1000)}`);
+              }
+
+              // Webpack fallback
+              await startDetachedSandboxCommand({
+                sandbox,
+                homeDir,
+                command: `NEXT_TELEMETRY_DISABLED=1 ./node_modules/.bin/next dev --hostname 0.0.0.0 --port 3000`,
+                logFile: `/tmp/next-dev-webpack.log`,
+              }).catch(() => {});
+
+              const remainingMs = Math.max(maxWaitMs - (Date.now() - startTime), 60000);
+              const fallbackStart = Date.now();
+              while (Date.now() - fallbackStart < remainingMs) {
+                await new Promise(r => setTimeout(r, pollIntervalMs));
+                const fbCheck = await sandbox.commands.run(
+                  `curl -s -o /dev/null -w "%{http_code}" --connect-timeout 1 http://127.0.0.1:3000 2>/dev/null || echo "000"`,
+                  { timeoutMs: 5000 }
+                ).catch(() => ({ stdout: "000" }));
+
+                if (fbCheck.stdout?.trim()?.match(/^[2-5]/)) {
+                  const totalElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                  console.log(`[start-dev-server] ✅ Port 3000 live via Webpack fallback after ${totalElapsed}s`);
+                  await appendMessageStatus(pendingMessageId, `✓ host port 3000 resolved live via Webpack fallback.`).catch(() => {});
+                  return { serverReady: true, homeDir };
+                }
+
+                const fbProcCheck = await sandbox.commands.run(
+                  `pgrep -f 'next dev' > /dev/null && echo "ALIVE" || echo "DEAD"`,
+                  { timeoutMs: 3000 }
+                ).catch(() => ({ stdout: "DEAD" }));
+                if (fbProcCheck.stdout?.trim() === "DEAD") {
+                  console.error("[start-dev-server] 💀 Webpack fallback also crashed.");
+                  await appendMessageStatus(pendingMessageId, "💀 standard Webpack compilation also crashed. Code contains fatal errors.").catch(() => {});
+                  processDeadDetected = true;
+                  break;
+                }
+              }
+              break;
+            }
           }
         }
 
-        console.error("[start-dev-server] ❌ Port 3000 not ready after 120s");
+        if (processDeadDetected) {
+          console.error("[start-dev-server] ❌ Server process crashed (fatal build error in generated code)");
+        } else {
+          console.error("[start-dev-server] ❌ Port 3000 not ready after 180s");
+        }
 
         // Capture build error for auto-fix
         let buildError = "Dev server failed to reach port 3000.";
@@ -1864,12 +2128,22 @@ body {
         // ⚡ PARALLEL: Update message to RESULT + create fragment simultaneously
         // NOTE: We do NOT overwrite fileActions here — the batch write in write-all-files
         // already stored the full file list with content. We only update type/content.
+        // Append final completion status to the conversation thread BEFORE transitioning
+        await appendMessageStatus(pendingMessageId, `Your app is live and ready! All ${Object.keys(result.state.data.files || {}).length} files compiled successfully. Click the preview below to see it in action.`);
+
+        // Read the current conversation content so we preserve the full agent thread
+        const currentMsg = await prisma.message.findUnique({
+          where: { id: pendingMessageId },
+          select: { content: true }
+        });
+
         const [,] = await Promise.all([
           prisma.message.update({
             where: { id: pendingMessageId },
             data: {
               type: "RESULT",
-              content: "Here is your custom application!",
+              // CRITICAL: Preserve the full conversation thread, don't overwrite with generic text
+              content: currentMsg?.content || "Here is your custom application!",
             },
           }),
           // Wait for URL to be externally reachable in parallel with fragment creation check

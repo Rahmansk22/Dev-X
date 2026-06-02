@@ -34,6 +34,12 @@ export function initializeDeploymentManager() {
     onError: async (deployment, error) => {
       console.log(`[Deployment] Error: ${error}`);
 
+      // CRITICAL GUARD: Prevent infinite self-healing loops for failed auto-fix deployment runs
+      if (deployment.buildId?.startsWith("deploy_heal_")) {
+        console.warn(`[Deployment] Self-healing deployment failed for app ${deployment.appId}. Aborting recursion loop.`);
+        return;
+      }
+
       // Log deployment error with self-healing
       await handleDeployEvent(
         deployment.appId,

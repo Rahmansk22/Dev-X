@@ -1,6 +1,6 @@
 "use client";
+/* eslint-disable react/jsx-no-literals */
 import React, { useEffect, Suspense, useState, useCallback } from "react";
-import { ResizablePanel, ResizablePanelGroup, ResizableHandle } from "@/components/ui/resizable";
 import { MessagesContainer } from "../components/messages-container";
 import { FragmentWeb } from "../components/fragment-web";
 import { Fragment } from "@prisma/client";
@@ -10,7 +10,7 @@ import { CodeIcon, CrownIcon, Loader2, AlertCircle, RefreshCcwIcon, ExternalLink
 import { toast } from "sonner";
 import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
-import { useMutation } from "@tanstack/react-query";
+
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { FileExplorer } from "@/components/file-explorer";
@@ -21,6 +21,15 @@ import { motion, AnimatePresence } from "framer-motion";
 import type { FallbackProps } from "react-error-boundary";
 import { GamesDock } from "../components/games-dock";
 import { cn } from "@/lib/utils";
+
+const TXT = {
+    EngineThinking: "Engine is thinking... Try a game?",
+    ModulesLoading: "Modules Loading",
+    DevXInterface: "Dev X Interface v4.2.1 Stable",
+    WannaTryGames: "Wanna try games until preview ready?",
+    AnalyzingCode: "Analyzing Code... Try a game?",
+    AnalyzingSource: "Analyzing Source"
+};
 
 function MessagesErrorFallback({ error }: FallbackProps) {
     return <ErrorFallback message="Error loading messages." error={error} />;
@@ -70,14 +79,15 @@ const ProjectView = ({ projectId }: Props) => {
     // Deployment state
     const [isDeploying, setIsDeploying] = useState(false);
     const [deployedUrl, setDeployedUrl] = useState<string | null>(null);
+    const [isReRunning, setIsReRunning] = useState(false);
 
     const trpc = useTRPC();
     const trpcAny = trpc as any;
 
-    const { data: project } = useQuery<{ name: string }>(
+    useQuery<{ name: string }>(
         trpcAny.projects.getOne.queryOptions({ id: projectId })
     );
-    const deployMutation = useMutation(trpcAny.deployments.deploy.mutationOptions() as any);
+
 
     useEffect(() => {
         setMounted(true);
@@ -99,42 +109,70 @@ const ProjectView = ({ projectId }: Props) => {
     }, [isMobile]);
 
     const handleDeploy = useCallback(async () => {
-        if (!activeFragment) return;
-
+        if (!projectId) return;
         setIsDeploying(true);
-
         try {
-            const result: any = await (deployMutation as any).mutateAsync({
-                appId: projectId,
-                buildId: activeFragment.id,
-                provider: "vercel",
-                sourceDir: ".",
+            const res = await fetch(`/api/projects/${projectId}/deploy`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: 'vercel' }),
             });
-
-            if (result?.success && result?.url) {
-                const url = result.url as string;
-                setDeployedUrl(url);
-                toast.success("Deployment Successful!", {
-                    description: "Your application is now live on Vercel.",
+            const data = await res.json();
+            if (data.success && data.url) {
+                setDeployedUrl(data.url);
+                toast.success('Deployed to Vercel!', {
+                    description: data.url,
                     action: {
-                        label: "Open App",
-                        onClick: () => window.open(url, "_blank")
-                    }
+                        label: 'Open',
+                        onClick: () => window.open(data.url, '_blank'),
+                    },
                 });
-                return;
+            } else {
+                toast.error('Deployment failed', {
+                    description: data.error || 'Unable to complete deployment.',
+                });
             }
-
-            toast.error("Deployment failed", {
-                description: result?.error || "Unable to complete deployment.",
-            });
         } catch (error) {
-            toast.error("Deployment failed", {
-                description: (error as Error)?.message || "Unable to complete deployment.",
+            toast.error('Deployment failed', {
+                description: (error as Error)?.message || 'Network error during deployment.',
             });
         } finally {
             setIsDeploying(false);
         }
-    }, [activeFragment, deployMutation, projectId]);
+    }, [projectId]);
+
+    const handleReRunPreview = useCallback(async () => {
+        if (!projectId) return;
+        setIsReRunning(true);
+        const toastId = toast.loading("Rebuilding environment & starting fresh dev server...");
+        try {
+            const res = await fetch(`/api/projects/${projectId}/wakeup`, {
+                method: "POST",
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                toast.success("Environment rebuilt successfully!", {
+                    id: toastId,
+                    description: "Dev server restarted in your app workspace. Syncing changes...",
+                });
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            } else {
+                toast.error("Re-run failed", {
+                    id: toastId,
+                    description: data.error || "Unable to restart the environment.",
+                });
+            }
+        } catch (error) {
+            toast.error("Re-run failed", {
+                id: toastId,
+                description: (error as Error)?.message || "Network error.",
+            });
+        } finally {
+            setIsReRunning(false);
+        }
+    }, [projectId]);
 
     // Auto-select first file when activeFragment OR emergentFiles changes
     useEffect(() => {
@@ -359,6 +397,29 @@ const ProjectView = ({ projectId }: Props) => {
                                         />
                                     )}
                                 </motion.button>
+
+                                <div className="h-4 w-px bg-white/10 mx-1" />
+
+                                {/* Re-run Environment Button */}
+                                <motion.button
+                                    onClick={handleReRunPreview}
+                                    disabled={isReRunning}
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    className={cn(
+                                        "group relative flex items-center gap-2 px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all duration-500 border overflow-hidden shadow-lg",
+                                        isReRunning
+                                            ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                                            : "border-emerald-500/30 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 hover:border-emerald-500/50 hover:shadow-emerald-500/10"
+                                    )}
+                                >
+                                    {isReRunning ? (
+                                        <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                                    ) : (
+                                        <RefreshCcwIcon className="w-3 h-3 group-hover:rotate-180 transition-transform duration-500" />
+                                    )}
+                                    <span>{isReRunning ? "Re-running..." : "Re-run Preview"}</span>
+                                </motion.button>
                             </motion.div>
                         )}
                     </AnimatePresence>
@@ -403,10 +464,10 @@ const ProjectView = ({ projectId }: Props) => {
                                     >
                                         <div className="shrink-0 py-2 border-b border-white/[0.04] bg-[#0c0c0c] flex items-center justify-center gap-3">
                                             <div className="size-1.5 rounded-full bg-blue-500 animate-pulse" />
-                                            <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Engine is thinking... Try a game?</span>
+                                            <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">{TXT.EngineThinking}</span>
                                         </div>
                                         <div className="flex-1 overflow-auto scrollbar-hide">
-                                            <GamesDock />
+                                            <GamesDock onClose={() => setShowGames(false)} />
                                         </div>
                                     </motion.div>
                                 ) : (
@@ -538,7 +599,7 @@ const ProjectView = ({ projectId }: Props) => {
                                                 <div className="space-y-2">
                                                     <div className="flex items-center justify-center gap-2">
                                                         <div className="size-1.5 rounded-full bg-blue-500 animate-pulse" />
-                                                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Modules Loading</span>
+                                                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">{TXT.ModulesLoading}</span>
                                                     </div>
                                                     <div className="relative h-[1px] w-48 bg-white/5 rounded-full overflow-hidden mx-auto">
                                                         <motion.div
@@ -547,7 +608,7 @@ const ProjectView = ({ projectId }: Props) => {
                                                             transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
                                                         />
                                                     </div>
-                                                    <span className="text-[8px] font-mono text-gray-600 uppercase tracking-widest block">Dev X Interface v4.2.1 Stable</span>
+                                                    <span className="text-[8px] font-mono text-gray-600 uppercase tracking-widest block">{TXT.DevXInterface}</span>
                                                 </div>
 
                                                 <motion.button
@@ -557,7 +618,7 @@ const ProjectView = ({ projectId }: Props) => {
                                                     className="flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-blue-500/10 backdrop-blur-md border border-blue-500/25 hover:bg-blue-500/20 hover:border-blue-500/40 transition-all duration-300 group mt-3 shadow-[0_0_15px_rgba(59,130,246,0.15)]"
                                                 >
                                                     <Gamepad2Icon size={15} className="text-blue-400/80 group-hover:text-blue-300 transition-colors" />
-                                                    <span className="text-[11px] font-black text-blue-400/80 group-hover:text-blue-300 uppercase tracking-widest transition-colors">Wanna try games until preview ready?</span>
+                                                    <span className="text-[11px] font-black text-blue-400/80 group-hover:text-blue-300 uppercase tracking-widest transition-colors">{TXT.WannaTryGames}</span>
                                                 </motion.button>
                                             </motion.div>
                                         </div>
@@ -596,10 +657,10 @@ const ProjectView = ({ projectId }: Props) => {
                                     >
                                         <div className="shrink-0 py-2 border-b border-white/[0.04] bg-[#0c0c0c] flex items-center justify-center gap-3">
                                             <div className="size-1.5 rounded-full bg-blue-500 animate-pulse" />
-                                            <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Analyzing Code... Try a game?</span>
+                                            <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">{TXT.AnalyzingCode}</span>
                                         </div>
                                         <div className="flex-1 overflow-auto scrollbar-hide">
-                                            <GamesDock />
+                                            <GamesDock onClose={() => setShowCodeGames(false)} />
                                         </div>
                                     </motion.div>
                                 ) : (
@@ -731,7 +792,7 @@ const ProjectView = ({ projectId }: Props) => {
                                                 <div className="space-y-2">
                                                     <div className="flex items-center justify-center gap-2">
                                                         <div className="size-1.5 rounded-full bg-purple-500 animate-pulse" />
-                                                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Analyzing Source</span>
+                                                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">{TXT.AnalyzingSource}</span>
                                                     </div>
                                                     <div className="relative h-[1px] w-48 bg-white/5 rounded-full overflow-hidden mx-auto">
                                                         <motion.div
@@ -740,7 +801,7 @@ const ProjectView = ({ projectId }: Props) => {
                                                             transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
                                                         />
                                                     </div>
-                                                    <span className="text-[8px] font-mono text-gray-600 uppercase tracking-widest block">Dev X Interface v4.2.1 Stable</span>
+                                                    <span className="text-[8px] font-mono text-gray-600 uppercase tracking-widest block">{TXT.DevXInterface}</span>
                                                 </div>
 
                                                 <motion.button
@@ -750,7 +811,7 @@ const ProjectView = ({ projectId }: Props) => {
                                                     className="flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-purple-500/10 backdrop-blur-md border border-purple-500/25 hover:bg-purple-500/20 hover:border-purple-500/40 transition-all duration-300 group mt-3 shadow-[0_0_15px_rgba(168,85,247,0.15)]"
                                                 >
                                                     <Gamepad2Icon size={15} className="text-purple-400/80 group-hover:text-purple-300 transition-colors" />
-                                                    <span className="text-[11px] font-black text-purple-400/80 group-hover:text-purple-300 uppercase tracking-widest transition-colors">Wanna try games until preview ready?</span>
+                                                    <span className="text-[11px] font-black text-purple-400/80 group-hover:text-purple-300 uppercase tracking-widest transition-colors">{TXT.WannaTryGames}</span>
                                                 </motion.button>
                                             </motion.div>
                                         </div>
