@@ -135,7 +135,8 @@ export const projectsRouter = createTRPCRouter({
       const startCredits = Date.now();
       try {
         await consumeCredits();
-      } catch {
+      } catch (creditsError: any) {
+        console.error("[Procedures] Credit consumption failed:", creditsError);
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
           message: "You have reached your usage limit",

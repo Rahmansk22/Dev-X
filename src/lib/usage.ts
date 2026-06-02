@@ -6,8 +6,8 @@ const RateLimiterPrisma = RateLimiterPrismaModule.default || RateLimiterPrismaMo
 import prisma from "./db";
 import { auth } from "@clerk/nextjs/server";
 
-const FREE_POINTS = 1000;
-const PRO_POINTS = 5000;
+const FREE_POINTS = 5;
+const PRO_POINTS = 25;
 const DURATION = 30 * 24 * 60 *60;  //30 days
 const GENERATION_COST = 1;
 
@@ -25,7 +25,7 @@ export async function getUsageTracker() {
 
   const usageTracker = new RateLimiterPrisma({
     storeClient: prisma,
-    tableName: "Usage",
+    tableName: "usage",
     points: hasPremiumAccess ? PRO_POINTS : FREE_POINTS,
     duration: DURATION,
   });
