@@ -59,8 +59,8 @@ export const MessagesContainer = ({
           const isGenerating = data?.some((m: any) => m.role === "ASSISTANT" && m.type === "ANALYSIS");
           const isWaiting = lastMessage?.role === "USER";
 
-          if (isGenerating || isWaiting) return 500;
-          return 3000;
+          if (isGenerating || isWaiting) return 2000; // Poll every 2 seconds when generating/waiting
+          return 4000; // Poll every 4 seconds when idle
         },
       }
     )
