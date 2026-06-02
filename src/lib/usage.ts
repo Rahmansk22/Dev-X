@@ -11,6 +11,24 @@ const PRO_POINTS = 25;
 const DURATION = 30 * 24 * 60 * 60;  // 30 days
 const GENERATION_COST = 1;
 
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> {
+  let attempt = 0;
+  while (attempt < retries) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      attempt++;
+      console.warn(`[Database Retry] Attempt ${attempt} failed: ${err.message || String(err)}`);
+      if (attempt >= retries) {
+        throw err;
+      }
+      // Linear backoff: 1s, 2s, etc.
+      await new Promise((resolve) => setTimeout(resolve, delay * attempt));
+    }
+  }
+  throw new Error("Retry failed");
+}
+
 export async function getUsageTracker(providedUserId?: string) {
   let userId = providedUserId || process.env.MOCK_USER_ID;
   if (!userId) {
@@ -24,10 +42,16 @@ export async function getUsageTracker(providedUserId?: string) {
   let hasPremiumAccess = false;
 
   if (userId) {
-    const subscription = await prisma.userSubscription.findUnique({
-      where: { userId },
-    });
-    hasPremiumAccess = subscription?.status === "active";
+    try {
+      const subscription = await withRetry(async () => 
+        await prisma.userSubscription.findUnique({
+          where: { userId: userId! },
+        })
+      );
+      hasPremiumAccess = subscription?.status === "active";
+    } catch (err) {
+      console.error("[UsageTracker] Failed to fetch subscription after retries:", err);
+    }
   }
 
   const usageTracker = new RateLimiterPrisma({
@@ -55,7 +79,9 @@ export async function consumeCredits(providedUserId?: string) {
   }
 
   const usageTracker = await getUsageTracker(userId);
-  const result = await usageTracker.consume(userId, GENERATION_COST);
+  const result = await withRetry(async () => 
+    await usageTracker.consume(userId!, GENERATION_COST)
+  );
   return result;
 }
 
@@ -74,6 +100,8 @@ export async function getUsageStatus(providedUserId?: string) {
   }
 
   const usageTracker = await getUsageTracker(userId);
-  const result = await usageTracker.get(userId);        //getPoints(userId)
+  const result = await withRetry(async () => 
+    await usageTracker.get(userId!)
+  );
   return result;
 }
