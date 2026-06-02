@@ -196,7 +196,7 @@ interface AgentState {
 export const codeAgentFunction = inngest.createFunction(
   {
     id: "code-agent",
-    concurrency: [{ limit: 50 }], // Increase global limit, remove per-project queuing
+    concurrency: [{ limit: 5 }], // Comply with Inngest Cloud Free Plan limits (max 5 concurrency)
     cancelOn: [{ event: "code-agent/cancel", match: "data.projectId" }],
     timeouts: {
       start: "15m",
