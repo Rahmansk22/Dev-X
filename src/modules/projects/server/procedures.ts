@@ -183,15 +183,19 @@ export const projectsRouter = createTRPCRouter({
 
       // 3. Inngest send
       const startInngest = Date.now();
-      await inngest.send({
-        name: "super-dev-x-router",
-        data: {
-          userMessage: input.value,
-          projectId: createdProject.id,
-          model: input.model,
-          mode: input.mode || "turbo",
-        },
-      });
+      try {
+        await inngest.send({
+          name: "super-dev-x-router",
+          data: {
+            userMessage: input.value,
+            projectId: createdProject.id,
+            model: input.model,
+            mode: input.mode || "turbo",
+          },
+        });
+      } catch (inngestErr) {
+        console.error("[Procedures] Failed to send trigger to Inngest:", inngestErr);
+      }
       timings.inngestSend = Date.now() - startInngest;
 
       timings.total = Date.now() - startAll;

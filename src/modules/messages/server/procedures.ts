@@ -120,15 +120,19 @@ export const messagesRouter = createTRPCRouter({
       });
 
       // SUPER DEV X: Use smart router to decide between question mode and generation mode
-      await inngest.send({
-        name: "super-dev-x-router",
-        data: {
-          projectId: input.projectId,
-          userMessage: input.value,
-          model: input.model,
-          mode: input.mode,
-        },
-      });
+      try {
+        await inngest.send({
+          name: "super-dev-x-router",
+          data: {
+            projectId: input.projectId,
+            userMessage: input.value,
+            model: input.model,
+            mode: input.mode,
+          },
+        });
+      } catch (inngestErr) {
+        console.error("[Procedures] Failed to send trigger to Inngest inside message creation:", inngestErr);
+      }
 
       return createdMessage;
     }),
