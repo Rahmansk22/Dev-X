@@ -193,8 +193,25 @@ export const projectsRouter = createTRPCRouter({
             mode: input.mode || "turbo",
           },
         });
-      } catch (inngestErr) {
+      } catch (inngestErr: any) {
         console.error("[Procedures] Failed to send trigger to Inngest:", inngestErr);
+        try {
+          await prisma.deploy.create({
+            data: {
+              userId: ctx.auth.userId || "unknown",
+              projectId: createdProject.id,
+              status: "FAILED",
+              error: `[Projects.create inngest.send] ${inngestErr?.stack || inngestErr?.message || String(inngestErr)}`,
+            }
+          });
+        } catch (dbErr) {
+          console.error("Failed to log inngest error to database:", dbErr);
+        }
+        // Surface the error so the user knows it failed rather than silently failing
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Event dispatch failed: ${inngestErr?.message || "Unknown error"}. Check Vercel logs or Inngest Event Key.`,
+        });
       }
       timings.inngestSend = Date.now() - startInngest;
 

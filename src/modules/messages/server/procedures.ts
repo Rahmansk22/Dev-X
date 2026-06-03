@@ -130,8 +130,25 @@ export const messagesRouter = createTRPCRouter({
             mode: input.mode,
           },
         });
-      } catch (inngestErr) {
+      } catch (inngestErr: any) {
         console.error("[Procedures] Failed to send trigger to Inngest inside message creation:", inngestErr);
+        try {
+          await prisma.deploy.create({
+            data: {
+              userId: ctx.auth.userId || "unknown",
+              projectId: input.projectId,
+              status: "FAILED",
+              error: `[Messages.create inngest.send] ${inngestErr?.stack || inngestErr?.message || String(inngestErr)}`,
+            }
+          });
+        } catch (dbErr) {
+          console.error("Failed to log inngest error to database:", dbErr);
+        }
+        // Surface the error so the user knows it failed rather than silently failing
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Event dispatch failed: ${inngestErr?.message || "Unknown error"}. Check Vercel logs or Inngest Event Key.`,
+        });
       }
 
       return createdMessage;
@@ -168,15 +185,33 @@ export const messagesRouter = createTRPCRouter({
         },
       });
 
-      // Trigger context building with all the information
-      await inngest.send({
-        name: "app/build-context",
-        data: {
-          projectId: input.projectId,
-          originalRequest: input.originalRequest,
-          userAnswers: input.answers,
-        },
-      });
+      try {
+        // Trigger context building with all the information
+        await inngest.send({
+          name: "app/build-context",
+          data: {
+            projectId: input.projectId,
+            originalRequest: input.originalRequest,
+            userAnswers: input.answers,
+          },
+        });
+      } catch (inngestErr: any) {
+        console.error("[Procedures] Failed to send trigger to Inngest inside answer handling:", inngestErr);
+        try {
+          await prisma.deploy.create({
+            data: {
+              userId: ctx.auth.userId || "unknown",
+              projectId: input.projectId,
+              status: "FAILED",
+              error: `[Messages.answer inngest.send] ${inngestErr?.stack || inngestErr?.message || String(inngestErr)}`,
+            }
+          });
+        } catch (dbErr) {}
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Event dispatch failed: ${inngestErr?.message || "Unknown error"}.`,
+        });
+      }
 
       return answerMessage;
     }),
