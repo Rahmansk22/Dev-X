@@ -3,7 +3,7 @@ import { Inngest } from "inngest";
 // Create a client to send and receive events
 export const inngest = new Inngest({
   id: "dev-x",
-  eventKey: process.env.INNGEST_EVENT_KEY,
+  ...(process.env.INNGEST_EVENT_KEY ? { eventKey: process.env.INNGEST_EVENT_KEY } : {}),
   // Force production endpoint on Vercel/production to prevent accidental local env overrides
   baseUrl: (process.env.NODE_ENV === "production" || !!process.env.VERCEL)
     ? "https://inn.gs/"

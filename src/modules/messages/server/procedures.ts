@@ -138,7 +138,7 @@ export const messagesRouter = createTRPCRouter({
               userId: ctx.auth.userId || "unknown",
               projectId: input.projectId,
               status: "FAILED",
-              error: `[Messages.create inngest.send] ${inngestErr?.stack || inngestErr?.message || String(inngestErr)}`,
+              error: `[Messages.create inngest.send] ${inngestErr?.stack || inngestErr?.message || String(inngestErr)}\n[Diagnostics] INNGEST_EVENT_KEY length: ${process.env.INNGEST_EVENT_KEY ? process.env.INNGEST_EVENT_KEY.length : "undefined"}, prefix: ${process.env.INNGEST_EVENT_KEY ? process.env.INNGEST_EVENT_KEY.substring(0, 5) : "none"}`,
             }
           });
         } catch (dbErr) {
@@ -203,7 +203,7 @@ export const messagesRouter = createTRPCRouter({
               userId: ctx.auth.userId || "unknown",
               projectId: input.projectId,
               status: "FAILED",
-              error: `[Messages.answer inngest.send] ${inngestErr?.stack || inngestErr?.message || String(inngestErr)}`,
+              error: `[Messages.answer inngest.send] ${inngestErr?.stack || inngestErr?.message || String(inngestErr)}\n[Diagnostics] INNGEST_EVENT_KEY length: ${process.env.INNGEST_EVENT_KEY ? process.env.INNGEST_EVENT_KEY.length : "undefined"}, prefix: ${process.env.INNGEST_EVENT_KEY ? process.env.INNGEST_EVENT_KEY.substring(0, 5) : "none"}`,
             }
           });
         } catch (dbErr) {}

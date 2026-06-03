@@ -201,7 +201,7 @@ export const projectsRouter = createTRPCRouter({
               userId: ctx.auth.userId || "unknown",
               projectId: createdProject.id,
               status: "FAILED",
-              error: `[Projects.create inngest.send] ${inngestErr?.stack || inngestErr?.message || String(inngestErr)}`,
+              error: `[Projects.create inngest.send] ${inngestErr?.stack || inngestErr?.message || String(inngestErr)}\n[Diagnostics] INNGEST_EVENT_KEY length: ${process.env.INNGEST_EVENT_KEY ? process.env.INNGEST_EVENT_KEY.length : "undefined"}, prefix: ${process.env.INNGEST_EVENT_KEY ? process.env.INNGEST_EVENT_KEY.substring(0, 5) : "none"}`,
             }
           });
         } catch (dbErr) {
