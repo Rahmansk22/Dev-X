@@ -62,14 +62,16 @@ export function canonicalizeDevxGeneratedPath(path: string): string {
   cleanPath = cleanPath.replace(/^\.\//, "").replace(/^\/+/, "");
   // Strip absolute sandbox paths the AI sometimes hallucinates
   cleanPath = cleanPath.replace(/^home\/user\/app\//, "");
-  // Loop: keep stripping duplicated directory prefixes until stable
-  // Catches app/app/page.tsx, app/app/app/page.tsx, components/components/Button.tsx, etc.
+
+  // Strip leading src/ and duplicate directory prefixes until stable
   let prev = "";
   while (prev !== cleanPath) {
     prev = cleanPath;
+    // Strip leading src/
+    cleanPath = cleanPath.replace(/^src\//, "");
+    // Strip duplicate directory prefixes (e.g. app/app/page.tsx -> app/page.tsx)
     cleanPath = cleanPath.replace(/^(app|components|lib|src)\/\1\//, "$1/");
   }
-  cleanPath = cleanPath.replace(/^src\//, "");
   return cleanPath;
 }
 

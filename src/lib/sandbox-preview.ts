@@ -1868,7 +1868,9 @@ export function sanitizePreviewFile(path: string, content: string): string {
     
     // Phase E: Fix double-double-quote pairs inside object values
     // e.g.  "All""  →  "All"   (only when followed by comma, closing brace, or whitespace)
-    fixed = fixed.replace(/(['"])([^'"\\]*?)\1{2,}(?=[\s,}\])])/g, "$1$2$1");
+    // We exclude structural punctuation like colons, commas, semicolons, and brackets from Group 2
+    // to prevent matching across separators (like "s" : "" -> "s" : ").
+    fixed = fixed.replace(/(['"])([^'"\\:;,{}()[\]]*?)\1{2,}(?=[\s,}\]);]|$)/g, "$1$2$1");
     
     // Phase F: DIRECT double-quote collapse (belt-and-suspenders for Phase E)
     // Catches the most common LLM pattern: "value"" → "value"
