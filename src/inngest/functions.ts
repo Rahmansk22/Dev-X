@@ -1011,9 +1011,9 @@ ${systemPrompt}`,
         // DeepSeek V4 Flash doesn't support tool_choice: "required" — use "auto"
         // Grok/GPT support "required" but "auto" works for all providers
         const toolChoiceValue = modelName.includes("deepseek") ? "auto" : "required";
-        // DeepSeek V4 Flash supports up to 65K output tokens. 8192 was causing truncation
-        // (completion=8394 → JSON broke → app/page.tsx lost). 16384 is safe headroom.
-        const maxTokensValue = modelName.includes("deepseek") ? 16384 : 128000;
+        // DeepSeek V4 Flash supports up to 65K output tokens. 16384 was STILL causing truncation
+        // for apps with 10+ files (calculator, todo). 32768 provides real headroom.
+        const maxTokensValue = modelName.includes("deepseek") ? 32768 : 128000;
 
         const apiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
@@ -1981,14 +1981,46 @@ ${CODE_GENERATION_GUARD}
         if (nextBinCheck.stdout?.trim() !== "OK") {
           console.log("[start-dev-server] 📦 next binary missing, running install...");
           await appendMessageStatus(pendingMessageId, `📦 Next.js compiler binary missing. Downloading and installing build packages...`).catch(() => {});
-          await sandbox.commands.run(
+          const installResult = await sandbox.commands.run(
             `cd '${homeDir}' && npm install --no-package-lock --prefer-offline --no-audit --no-fund --ignore-scripts`,
             { timeoutMs: 120000 }
-          ).catch(() => {});
+          ).catch((err: any) => {
+            console.error("[start-dev-server] ❌ npm install FAILED:", err?.message);
+            return { exitCode: 1, stdout: "", stderr: err?.message || "" } as any;
+          });
+
+          // ── POST-INSTALL VERIFICATION: Ensure next binary actually exists ──
+          const postInstallCheck = await sandbox.commands.run(
+            `cd '${homeDir}' && [ -f node_modules/.bin/next ] && echo "OK" || echo "MISSING"`,
+            { timeoutMs: 5000 }
+          ).catch(() => ({ stdout: "MISSING" }));
+
+          if (postInstallCheck.stdout?.trim() !== "OK") {
+            console.error("[start-dev-server] ❌ next binary STILL missing after install. Retrying with cache clear...");
+            await appendMessageStatus(pendingMessageId, `⚠️ Installation incomplete. Retrying with fresh cache...`).catch(() => {});
+            await sandbox.commands.run(
+              `cd '${homeDir}' && npm cache clean --force 2>/dev/null; npm install --no-package-lock --no-audit --no-fund --ignore-scripts`,
+              { timeoutMs: 150000 }
+            ).catch((err: any) => {
+              console.error("[start-dev-server] ❌ npm install RETRY also failed:", err?.message);
+            });
+          }
           await appendMessageStatus(pendingMessageId, `✓ Compilation package installation complete.`).catch(() => {});
         } else {
           console.log("[start-dev-server] ✅ next binary found, skipping install");
           await appendMessageStatus(pendingMessageId, "✓ Core compiler binary verified.").catch(() => {});
+        }
+
+        // ── 5.5. Final binary gate: Abort early if next is STILL missing ──
+        const finalBinCheck = await sandbox.commands.run(
+          `cd '${homeDir}' && [ -f node_modules/.bin/next ] && echo "OK" || echo "MISSING"`,
+          { timeoutMs: 5000 }
+        ).catch(() => ({ stdout: "MISSING" }));
+
+        if (finalBinCheck.stdout?.trim() !== "OK") {
+          console.error("[start-dev-server] 💀 next binary missing after all install attempts. Cannot start dev server.");
+          await appendMessageStatus(pendingMessageId, "💀 Failed to install Next.js after multiple attempts. The dev server cannot start.").catch(() => {});
+          return { sandboxUrl: null, status: "error", error: "npm install failed: next binary not found after 2 attempts", buildError: "npm install failed: next binary not found in node_modules/.bin/next after 2 install attempts. This is likely a sandbox resource issue (OOM or network timeout).", validationFailed: true };
         }
 
         // ── 6. Start dev server DETACHED (not chained behind install) ──
@@ -2116,6 +2148,29 @@ ${CODE_GENERATION_GUARD}
 
         return { sandboxUrl: null, status: "error", error: buildError.slice(-500), buildError, validationFailed: true };
       });
+
+      // ══════════════════════════════════════════════════════════════
+      // BUILD FAILURE SHORT-CIRCUIT: Don't show a dead preview link
+      // The auto-fix event was already dispatched inside start-dev-server.
+      // Show the user a clear error message instead of a broken iframe.
+      // ══════════════════════════════════════════════════════════════
+      if ((startDevServerResult as any)?.validationFailed) {
+        await step.run("save-build-error", async () => {
+          const buildError = (startDevServerResult as any)?.buildError || "Unknown build error";
+          console.error("[save-build-error] ❌ Build failed. Showing error to user instead of dead preview.");
+
+          // Show the user a clear error — NOT a dead preview iframe
+          await prisma.message.update({
+            where: { id: pendingMessageId },
+            data: {
+              type: "ANALYSIS",
+              content: `⚠️ The generated code has a build error — I've automatically dispatched a fix and will retry.\n\nError details:\n\`\`\`\n${buildError.slice(-800)}\n\`\`\`\n\nA new run is fixing this automatically. Please wait a moment.`,
+            },
+          });
+        });
+        // Return early — do NOT create a fragment with a dead sandbox URL
+        return { status: "build_error_autofix_dispatched", buildError: (startDevServerResult as any)?.error };
+      }
 
       // ══════════════════════════════════════════════════════════════
       // STEP 6: Save fragment with preview URL
