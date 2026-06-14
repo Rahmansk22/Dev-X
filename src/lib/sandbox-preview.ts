@@ -1944,6 +1944,70 @@ export function sanitizePreviewFile(path: string, content: string): string {
     }
   }
 
+  // Phase K: Trailing unbalanced curly braces repair
+  if (/\.(tsx?|jsx?)$/.test(path)) {
+    const beforeK = fixed;
+    let openBraces = 0;
+    let closeBraces = 0;
+    let inString: '"' | "'" | '`' | null = null;
+    let inComment: 'single' | 'multi' | null = null;
+
+    for (let i = 0; i < fixed.length; i++) {
+      const char = fixed[i];
+      if (inComment === 'single') {
+        if (char === '\n') inComment = null;
+        continue;
+      }
+      if (inComment === 'multi') {
+        if (char === '*' && fixed[i + 1] === '/') {
+          inComment = null;
+          i++;
+        }
+        continue;
+      }
+      if (inString) {
+        if (char === '\\') {
+          i++;
+        } else if (char === inString) {
+          inString = null;
+        }
+        continue;
+      }
+      if (char === '/' && fixed[i + 1] === '/') {
+        inComment = 'single';
+        i++;
+        continue;
+      }
+      if (char === '/' && fixed[i + 1] === '*') {
+        inComment = 'multi';
+        i++;
+        continue;
+      }
+      if (char === '"' || char === "'" || char === '`') {
+        inString = char;
+        continue;
+      }
+
+      if (char === '{') openBraces++;
+      if (char === '}') closeBraces++;
+    }
+
+    if (closeBraces > openBraces) {
+      const excess = closeBraces - openBraces;
+      let stripped = 0;
+      let newFixed = fixed;
+      while (stripped < excess && newFixed.trim().endsWith('}')) {
+        const lastBraceIndex = newFixed.lastIndexOf('}');
+        newFixed = newFixed.substring(0, lastBraceIndex) + newFixed.substring(lastBraceIndex + 1);
+        stripped++;
+      }
+      if (stripped > 0) {
+        console.log(`[sanitize] 🩹 Stripped ${stripped} excess trailing closing braces in ${path}`);
+        fixed = newFixed;
+      }
+    }
+  }
+
   // 4.5. UNTERMINATED STRING REPAIR (Root cause fix for broken JSON repair)
   // When the AI's JSON response is truncated mid-string, the regex-based repair
   // extracts files whose content ends with unclosed string literals, e.g.:
