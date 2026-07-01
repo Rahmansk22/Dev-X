@@ -79,6 +79,7 @@ const ProjectView = ({ projectId }: Props) => {
     // Deployment state
     const [isDeploying, setIsDeploying] = useState(false);
     const [deployedUrl, setDeployedUrl] = useState<string | null>(null);
+    const [showUpgradeModal, setShowUpgradeModal] = useState(false);
     const [isReRunning, setIsReRunning] = useState(false);
 
     const trpc = useTRPC();
@@ -108,38 +109,10 @@ const ProjectView = ({ projectId }: Props) => {
         if (isMobile) setMobileView("build");
     }, [isMobile]);
 
-    const handleDeploy = useCallback(async () => {
-        if (!projectId) return;
-        setIsDeploying(true);
-        try {
-            const res = await fetch(`/api/projects/${projectId}/deploy`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider: 'vercel' }),
-            });
-            const data = await res.json();
-            if (data.success && data.url) {
-                setDeployedUrl(data.url);
-                toast.success('Deployed to Vercel!', {
-                    description: data.url,
-                    action: {
-                        label: 'Open',
-                        onClick: () => window.open(data.url, '_blank'),
-                    },
-                });
-            } else {
-                toast.error('Deployment failed', {
-                    description: data.error || 'Unable to complete deployment.',
-                });
-            }
-        } catch (error) {
-            toast.error('Deployment failed', {
-                description: (error as Error)?.message || 'Network error during deployment.',
-            });
-        } finally {
-            setIsDeploying(false);
-        }
-    }, [projectId]);
+    const handleDeploy = useCallback(() => {
+        // Show premium upgrade modal instead of attempting to deploy
+        setShowUpgradeModal(true);
+    }, []);
 
     const handleReRunPreview = useCallback(async () => {
         if (!projectId) return;
@@ -396,29 +369,6 @@ const ProjectView = ({ projectId }: Props) => {
                                             transition={{ duration: 4.5, ease: "easeInOut" }}
                                         />
                                     )}
-                                </motion.button>
-
-                                <div className="h-4 w-px bg-white/10 mx-1" />
-
-                                {/* Re-run Environment Button */}
-                                <motion.button
-                                    onClick={handleReRunPreview}
-                                    disabled={isReRunning}
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    className={cn(
-                                        "group relative flex items-center gap-2 px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all duration-500 border overflow-hidden shadow-lg",
-                                        isReRunning
-                                            ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                                            : "border-emerald-500/30 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 hover:border-emerald-500/50 hover:shadow-emerald-500/10"
-                                    )}
-                                >
-                                    {isReRunning ? (
-                                        <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
-                                    ) : (
-                                        <RefreshCcwIcon className="w-3 h-3 group-hover:rotate-180 transition-transform duration-500" />
-                                    )}
-                                    <span>{isReRunning ? "Re-running..." : "Re-run Preview"}</span>
                                 </motion.button>
                             </motion.div>
                         )}
@@ -875,8 +825,95 @@ const ProjectView = ({ projectId }: Props) => {
                     </div>
                 </div>
             )}
+
+            {/* Premium Upgrade Modal */}
+            <AnimatePresence>
+                {showUpgradeModal && (
+                    <UpgradeModal open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
+                )}
+            </AnimatePresence>
         </div>
     );
 };
 
+// ═══════════════════════════════════════════════════════════
+// PREMIUM UPGRADE MODAL
+// ═══════════════════════════════════════════════════════════
+function UpgradeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+    if (!open) return null;
+    return (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" onClick={onClose}>
+            <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" />
+            <motion.div
+                initial={{ opacity: 0, scale: 0.92, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.92, y: 20 }}
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                className="relative z-10 w-full max-w-lg rounded-3xl border border-white/10 bg-[#0a0a0a] shadow-[0_0_120px_rgba(99,102,241,0.15)] overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+            >
+                {/* Gradient accent top */}
+                <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-indigo-500/60 to-transparent" />
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-indigo-500/10 blur-3xl rounded-full pointer-events-none" />
+
+                <div className="p-8 flex flex-col items-center text-center gap-6">
+                    {/* Icon */}
+                    <div className="relative">
+                        <div className="absolute inset-0 bg-indigo-500/20 blur-2xl rounded-full" />
+                        <div className="relative size-20 rounded-2xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 flex items-center justify-center shadow-[0_0_40px_rgba(99,102,241,0.4)]">
+                            <RocketIcon className="size-9 text-white" />
+                        </div>
+                    </div>
+
+                    {/* Title */}
+                    <div className="space-y-2">
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[9px] font-black uppercase tracking-[0.2em]">
+                            <CrownIcon size={10} fill="currentColor" />
+                            Premium Feature
+                        </div>
+                        <h2 className="text-2xl font-black text-white tracking-tight">
+                            Deploy to Production
+                        </h2>
+                        <p className="text-sm text-gray-400 leading-relaxed max-w-sm">
+                            Unlock one-click Vercel deployments, custom domains, and production-grade hosting with a Dev X Premium plan.
+                        </p>
+                    </div>
+
+                    {/* Features */}
+                    <div className="w-full grid grid-cols-1 gap-2 text-left">
+                        {[
+                            { icon: "🚀", label: "One-click Vercel deployment" },
+                            { icon: "🌐", label: "Custom domain support" },
+                            { icon: "⚡", label: "Edge network & global CDN" },
+                            { icon: "🔒", label: "SSL certificates included" },
+                            { icon: "♾️",  label: "Unlimited projects & builds" },
+                        ].map(({ icon, label }) => (
+                            <div key={label} className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.05]">
+                                <span className="text-base">{icon}</span>
+                                <span className="text-[11px] font-bold text-gray-300">{label}</span>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* CTA buttons */}
+                    <div className="w-full flex flex-col gap-3">
+                        <Link href="/pricing" className="w-full" onClick={onClose}>
+                            <button className="w-full h-12 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-[12px] font-black uppercase tracking-widest transition-all duration-300 shadow-[0_0_30px_rgba(99,102,241,0.35)] hover:shadow-[0_0_40px_rgba(99,102,241,0.5)] active:scale-[0.98]">
+                                Upgrade to Premium →
+                            </button>
+                        </Link>
+                        <button
+                            onClick={onClose}
+                            className="w-full h-10 rounded-xl text-gray-600 hover:text-gray-400 text-[10px] font-bold uppercase tracking-widest transition-colors"
+                        >
+                            Maybe Later
+                        </button>
+                    </div>
+                </div>
+            </motion.div>
+        </div>
+    );
+}
+
 export default ProjectView;
+

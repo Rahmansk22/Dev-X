@@ -314,23 +314,52 @@ export function FragmentWeb({ data, projectId }: Props) {
   }, []);
 
   // ── Auto-fix handler ──
+  // KEY FIX: Fetch the actual build error from the sandbox FIRST,
+  // then pass it to the autofix API so the AI sees the real error.
   const handleAutoFix = useCallback(async () => {
     if (!projectId || isAutoFixing) return;
     setIsAutoFixing(true);
     try {
-      const errorPayload = buildError || reconnectError || 'Preview failed to load. Unknown build error.';
+      // Step 1: Get the real build error from the sandbox logs
+      let realError = buildError || reconnectError || 'Preview failed to load. Unknown build error.';
+      try {
+        const logRes = await fetch(`/api/projects/${projectId}/build-error`, {
+          method: 'GET',
+          cache: 'no-store',
+        });
+        if (logRes.ok) {
+          const logData = await logRes.json();
+          if (logData.error && logData.error.length > 20) {
+            console.log('[FragmentWeb] 📋 Got real build error from sandbox:', logData.error.slice(0, 200));
+            realError = logData.error;
+          }
+        }
+      } catch (logErr) {
+        console.warn('[FragmentWeb] Could not fetch build error from sandbox, using local state:', logErr);
+      }
+
+      // Step 2: Send the real error to the autofix AI
       const res = await fetch(`/api/projects/${projectId}/autofix`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: errorPayload }),
+        body: JSON.stringify({ error: realError }),
       });
       if (res.ok) {
+        const data = await res.json();
         setAutoFixTriggered(true);
         setBuildError(null);
-        // Auto-refresh preview after fix — perform a clean window reload to completely synchronize the client-side state
+        console.log('[FragmentWeb] ✅ Autofix applied:', data.explanation);
+        // Trigger wakeup to reload sandbox with fixed files, then reload page
+        try {
+          await fetch(`/api/projects/${projectId}/wakeup`, { method: 'POST' });
+        } catch { /* non-fatal */ }
         setTimeout(() => {
           window.location.reload();
-        }, 2000);
+        }, 2500);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        console.error('[FragmentWeb] Autofix failed:', errData);
+        setBuildError(errData.error || 'Autofix failed. Please try again.');
       }
     } catch (e) {
       console.error('[FragmentWeb] Auto-fix request failed:', e);
@@ -338,6 +367,7 @@ export function FragmentWeb({ data, projectId }: Props) {
       setIsAutoFixing(false);
     }
   }, [projectId, buildError, reconnectError, isAutoFixing]);
+
 
   return (
     <div className="flex-1 flex flex-col w-full h-full bg-[#050505] relative overflow-hidden">

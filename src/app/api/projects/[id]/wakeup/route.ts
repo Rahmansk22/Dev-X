@@ -855,3 +855,4 @@ async function updateFragmentsUrl(projectId: string, url: string, log: (m: strin
     log(`⚠️ Could not update fragment URLs in database: ${err}`);
   }
 }
+
