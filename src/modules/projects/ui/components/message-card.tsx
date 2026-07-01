@@ -25,7 +25,7 @@ import {
   BinaryIcon,
   PaletteIcon,
   WrenchIcon,
-  Loader2Icon,
+
   ShieldCheckIcon,
   LayersIcon,
   ExternalLinkIcon,
@@ -594,7 +594,7 @@ const AssistantMessage = ({
             <div className="flex flex-col">
               <span className="text-[11px] font-black text-white uppercase tracking-widest leading-none">DEV-X ENGINE</span>
               <span className="text-[9px] font-bold text-gray-500 uppercase tracking-tighter tabular-nums pt-1">
-                {isGenerating ? "Processing Stream" : formatDistanceToNow(createdAt, { addSuffix: true })}
+                {isGenerating ? "Thinking..." : formatDistanceToNow(createdAt, { addSuffix: true })}
               </span>
             </div>
           </div>
@@ -609,101 +609,251 @@ const AssistantMessage = ({
           </div>
         )}
 
-        {/* ── COLLAPSIBLE AGENT TIMELINE ── */}
+        {/* ── THINKING BLOCK (Lovable/Emergent style) ── */}
         {mergedSteps.length > 0 && (
-          <div className="w-full mt-1.5 relative z-20 pl-1">
-            <div className="overflow-hidden transition-all duration-300">
-              {/* Collapsible Trigger */}
-              <button
-                onClick={() => setShowThinking(!showThinking)}
-                className="flex items-center gap-2 py-1.5 px-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 active:bg-white/10 transition-all text-left"
-              >
-                <div className="size-5 rounded bg-blue-500/10 flex items-center justify-center">
-                  <motion.div
-                    animate={isGenerating ? { rotate: 360 } : {}}
-                    transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-                  >
-                    <CpuIcon size={11} className="text-blue-400" />
-                  </motion.div>
-                </div>
-                <span className="text-[11px] font-semibold tracking-tight">
-                  {isGenerating ? "Analyzing & building..." : "Execution steps"}
-                </span>
-                <div className="px-1 py-0.5 rounded bg-white/5 text-[8px] font-bold text-slate-500 leading-none">
-                  {mergedSteps.length}
-                </div>
-                <ChevronRightIcon
-                  size={12}
-                  className={cn(
-                    "text-gray-500 transition-transform duration-300",
-                    showThinking ? "rotate-90" : "rotate-0"
-                  )}
-                />
-                {isGenerating && (
-                  <span className="text-[9px] text-blue-400/80 animate-pulse font-mono truncate max-w-[180px] ml-2">
-                    ({latestStepText || "Orchestrating..."})
-                  </span>
-                )}
-              </button>
+          <div className="w-full mt-2 relative z-20">
+            {/* Shimmer keyframe injected once */}
+            <style>{`
+              @keyframes devx-shimmer {
+                0%   { background-position: 200% center; }
+                100% { background-position: -200% center; }
+              }
+              .devx-shimmer {
+                background: linear-gradient(
+                  90deg,
+                  rgba(255,255,255,0.03) 0%,
+                  rgba(99,102,241,0.12) 30%,
+                  rgba(168,85,247,0.10) 50%,
+                  rgba(99,102,241,0.12) 70%,
+                  rgba(255,255,255,0.03) 100%
+                );
+                background-size: 200% 100%;
+                animation: devx-shimmer 2s ease-in-out infinite;
+              }
+              @keyframes devx-shimmer-bar {
+                0%   { background-position: 200% center; }
+                100% { background-position: -200% center; }
+              }
+              .devx-shimmer-bar {
+                background: linear-gradient(
+                  90deg,
+                  rgba(255,255,255,0.05) 0%,
+                  rgba(99,102,241,0.18) 40%,
+                  rgba(168,85,247,0.14) 60%,
+                  rgba(255,255,255,0.05) 100%
+                );
+                background-size: 200% 100%;
+                animation: devx-shimmer-bar 1.6s ease-in-out infinite;
+              }
+            `}</style>
 
-              {/* Steps Area */}
-              <AnimatePresence initial={false}>
-                {showThinking && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.2, ease: "easeInOut" }}
-                    className="overflow-hidden border-l border-white/5 ml-3.5 pl-4 mt-2"
-                  >
-                    <div className="flex flex-col gap-3 py-1">
+            {/* Collapsible Trigger */}
+            <button
+              onClick={() => setShowThinking(!showThinking)}
+              className="group flex items-center gap-2 py-1.5 px-2.5 rounded-xl text-gray-400 hover:text-white hover:bg-white/[0.04] active:bg-white/[0.06] transition-all text-left w-full select-none"
+            >
+              {/* Icon with spin while generating */}
+              <div className="relative size-5 flex items-center justify-center shrink-0">
+                {isGenerating ? (
+                  <>
+                    <div className="absolute inset-0 rounded bg-indigo-500/20 blur-sm animate-pulse" />
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                      className="relative"
+                    >
+                      <CpuIcon size={12} className="text-indigo-400" />
+                    </motion.div>
+                  </>
+                ) : (
+                  <CpuIcon size={12} className="text-gray-500 group-hover:text-indigo-400 transition-colors" />
+                )}
+              </div>
+
+              {/* Label */}
+              <span className={cn(
+                "text-[11px] font-bold tracking-wider uppercase",
+                isGenerating ? "text-indigo-300" : "text-gray-500 group-hover:text-gray-300"
+              )}>
+                {isGenerating ? "Thinking" : "Thoughts"}
+              </span>
+
+              {/* Step count badge */}
+              <div className={cn(
+                "px-1.5 py-0.5 rounded-md text-[8px] font-black leading-none transition-all",
+                isGenerating
+                  ? "bg-indigo-500/15 text-indigo-400 border border-indigo-500/20"
+                  : "bg-white/5 text-slate-500"
+              )}>
+                {mergedSteps.length}
+              </div>
+
+              {/* Live ticker */}
+              {isGenerating && (
+                <span className="text-[9px] text-indigo-400/70 font-mono truncate max-w-[160px] ml-1 animate-pulse">
+                  {latestStepText || "Orchestrating..."}
+                </span>
+              )}
+
+              {/* Chevron */}
+              <ChevronRightIcon
+                size={11}
+                className={cn(
+                  "ml-auto text-gray-600 transition-transform duration-300",
+                  showThinking ? "rotate-90" : "rotate-0"
+                )}
+              />
+            </button>
+
+            {/* Steps Panel */}
+            <AnimatePresence initial={false}>
+              {showThinking && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                  className="overflow-hidden"
+                >
+                  <div className={cn(
+                    "mt-2 rounded-2xl border overflow-hidden",
+                    isGenerating
+                      ? "border-indigo-500/15 bg-[#0d0d14]"
+                      : "border-white/[0.05] bg-[#0a0a0f]"
+                  )}>
+                    {/* Top shimmer stripe */}
+                    {isGenerating && (
+                      <div className="h-px w-full devx-shimmer" />
+                    )}
+
+                    <div className="flex flex-col divide-y divide-white/[0.04]">
                       {mergedSteps.map((step, idx) => {
                         const stepConfig = getStepDetails(step.title);
                         const isCurrent = step.isCurrent;
-                        
+                        const isDone = !isCurrent && !isGenerating;
+                        const isPending = isGenerating && !isCurrent && idx > mergedSteps.findIndex(s => s.isCurrent);
+                        const isShimmering = isCurrent || (isGenerating && idx >= mergedSteps.length - 2);
+
                         return (
                           <motion.div
                             key={step.id}
-                            initial={{ opacity: 0, x: -5 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            className="flex items-center gap-2.5 group/step text-[11.5px]"
+                            initial={{ opacity: 0, y: 4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.3, delay: idx * 0.03, ease: "easeOut" }}
+                            className={cn(
+                              "relative flex items-center gap-3 px-4 py-3 text-[11.5px] transition-all group/step",
+                              isCurrent && "devx-shimmer",
+                              !isCurrent && !isDone && isGenerating && "opacity-60"
+                            )}
                           >
-                            <div className={cn(
-                              "size-5 rounded flex items-center justify-center transition-all shrink-0",
-                              isCurrent ? "bg-blue-500/10 text-blue-400" : "text-gray-500"
-                            )}>
+                            {/* Status dot */}
+                            <div className="shrink-0 relative">
                               {isCurrent ? (
-                                <Loader2Icon size={10} className="animate-spin text-blue-400" />
+                                <div className="relative size-4 flex items-center justify-center">
+                                  <div className="absolute size-4 rounded-full bg-indigo-500/30 animate-ping" />
+                                  <div className="relative size-2 rounded-full bg-indigo-400" />
+                                </div>
+                              ) : isDone || (!isGenerating) ? (
+                                <div className="size-4 flex items-center justify-center">
+                                  {step.isSuccess || !isGenerating ? (
+                                    <CheckCircle2Icon size={13} className="text-emerald-500/80" />
+                                  ) : (
+                                    stepConfig.icon
+                                  )}
+                                </div>
                               ) : (
-                                stepConfig.icon
+                                <div className="size-4 flex items-center justify-center opacity-40">
+                                  <div className="size-1.5 rounded-full bg-gray-500" />
+                                </div>
                               )}
                             </div>
-                            <span className={cn(
-                              "font-medium tracking-tight",
-                              isCurrent ? "text-blue-400" : "text-gray-400"
-                            )}>
-                              {stripEmojis(step.title)}
-                            </span>
-                            {step.details && (
-                              <span className="text-[10px] text-gray-500 font-mono truncate max-w-[200px]">
-                                {step.details}
-                              </span>
-                            )}
-                            {step.badge && (
-                              <span className="px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 text-[8px] font-black uppercase tracking-wider leading-none">
-                                {step.badge}
-                              </span>
+
+                            {/* Text content */}
+                            <div className="flex-1 min-w-0 flex items-center gap-2">
+                              {isShimmering && isGenerating ? (
+                                /* Shimmer skeleton for current/near-current steps */
+                                <div className="flex items-center gap-2 w-full">
+                                  <div
+                                    className="devx-shimmer-bar rounded-md h-2.5 flex-1 max-w-[180px]"
+                                    style={{ opacity: 0.7 }}
+                                  />
+                                  {step.details && (
+                                    <div
+                                      className="devx-shimmer-bar rounded-md h-2 w-16"
+                                      style={{ opacity: 0.4 }}
+                                    />
+                                  )}
+                                </div>
+                              ) : (
+                                <>
+                                  <span className={cn(
+                                    "font-medium tracking-tight truncate",
+                                    isCurrent ? "text-indigo-300" :
+                                    isDone ? "text-gray-400" :
+                                    "text-gray-600"
+                                  )}>
+                                    {stripEmojis(step.title)}
+                                  </span>
+                                  {step.details && (
+                                    <span className="text-[10px] text-gray-500 font-mono truncate max-w-[140px] shrink-0">
+                                      {step.details}
+                                    </span>
+                                  )}
+                                  {step.badge && (
+                                    <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400/80 text-[8px] font-black uppercase tracking-wider leading-none">
+                                      {step.badge}
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </div>
+
+                            {/* Right badge - type label */}
+                            {!isShimmering && (
+                              <div className={cn(
+                                "shrink-0 text-[8px] font-black uppercase tracking-widest leading-none px-1.5 py-0.5 rounded-md",
+                                isCurrent
+                                  ? "text-indigo-400/70 bg-indigo-500/10"
+                                  : "text-gray-600 bg-white/[0.03]"
+                              )}>
+                                {stepConfig.label}
+                              </div>
                             )}
                           </motion.div>
                         );
                       })}
+
+                      {/* Live activity skeleton rows at bottom when generating */}
+                      {isGenerating && (
+                        <>
+                          <div className="flex items-center gap-3 px-4 py-3 devx-shimmer">
+                            <div className="size-4 flex items-center justify-center shrink-0">
+                              <div className="size-2 rounded-full bg-indigo-400/40 animate-pulse" />
+                            </div>
+                            <div className="devx-shimmer-bar rounded-md h-2.5 flex-1 max-w-[220px] opacity-50" />
+                            <div className="devx-shimmer-bar rounded-md h-2 w-12 opacity-30" />
+                          </div>
+                          <div className="flex items-center gap-3 px-4 py-3">
+                            <div className="size-4 flex items-center justify-center shrink-0">
+                              <div className="size-1.5 rounded-full bg-gray-600/30" />
+                            </div>
+                            <div className="h-2 w-[160px] rounded-md bg-white/[0.03]" />
+                          </div>
+                        </>
+                      )}
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+
+                    {/* Bottom shimmer stripe */}
+                    {isGenerating && (
+                      <div className="h-px w-full devx-shimmer" />
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
+
 
         {/* ── ANALYSIS & PROGRESS (Files) ── */}
         {fileActions.length > 0 && (
