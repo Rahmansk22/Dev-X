@@ -919,6 +919,46 @@ ${exportStyle}(${propHints.propsParam}) {
     }
   }
 
+  // ── FIX 10: JSX closing brace swallowed into CSS string literal ──
+  // Error: "Expected '</', got 'animate'" / "Expected '</', got 'X'"
+  // Root cause: LLM generates Framer Motion / style props where }} gets embedded in the string:
+  //   initial={{ opacity: 0, filter: "blur(10px) }}"
+  //   animate={{ opacity: 1, filter: "blur(0px) }}"
+  //   style={{ boxShadow: "0 4px 24px rgba(0,0,0,0.1) }}"
+  // The "}}" meant to CLOSE the JSX expression is inside the string instead.
+  // This causes the next prop (animate, transition, etc.) to appear as an unexpected token.
+  const isJsxClosingBraceError =
+    /Expected\s+['"]?<\/['"]?,\s+got\s+['"]?[a-zA-Z]/i.test(errorText) ||
+    /Expected\s+['"]?[<\/]+['"]?,\s+got\s+['"]?[a-zA-Z]/i.test(errorText) ||
+    (isSyntaxError && /filter|blur|shadow|gradient|translate|scale|rotate|opacity/.test(errorText));
+
+  if (isJsxClosingBraceError || isSyntaxError) {
+    const errorFileMatch10 = errorText.match(/\.\/(app\/)?([^\s(]+\.tsx?)\s*\(/) ||
+      errorText.match(/\.\/([^\s(]+\.tsx?)/);
+    if (errorFileMatch10) {
+      const rawPath = errorFileMatch10[1] ? errorFileMatch10[1] + errorFileMatch10[2] : errorFileMatch10[1] ?? "";
+      const canonicalized = canonicalizeDevxGeneratedPath(rawPath || "");
+      const candidates = [rawPath, canonicalized, `app/${rawPath}`, rawPath.replace(/^app\//, "")].filter(Boolean);
+      for (const candidate of candidates) {
+        if (files[candidate]) {
+          const orig = files[candidate];
+          // Apply the Phase 4.8 fix directly here for surgical precision
+          let resanitized = orig;
+          resanitized = resanitized.replace(/("(?:[^"\\]|\\.)*?)\s*\}\}"/g, '$1" }}');
+          resanitized = resanitized.replace(/('(?:[^'\\]|\\.)*?)\s*\}\}'/g, "$1' }}");
+          // Also apply full sanitizePreviewFile to catch any other issues in the same file
+          resanitized = sanitizePreviewFile(candidate, resanitized);
+          if (resanitized !== orig) {
+            return {
+              files: { [candidate]: resanitized },
+              explanation: `Fixed JSX closing brace swallowed into CSS string in ${candidate} — "}}" was incorrectly inside string value (e.g. filter: "blur(10px) }}" → "blur(10px)" }})`,
+            };
+          }
+        }
+      }
+    }
+  }
+
   return null; // No instant fix available — fall through to AI
 }
 

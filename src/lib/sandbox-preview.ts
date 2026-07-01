@@ -2211,6 +2211,83 @@ export function sanitizePreviewFile(path: string, content: string): string {
     }
   }
 
+  // 4.8. JSX CLOSING BRACE SWALLOWED INTO STRING (Root cause of "Expected '</', got 'X'" errors)
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // The LLM frequently generates Framer Motion (and other JSX) props like:
+  //   initial={{ opacity: 0, y: 30, filter: "blur(10px) }}"
+  //   animate={{ opacity: 1, y: 0, filter: "blur(0px) }}"
+  //   style={{ boxShadow: "0 4px 24px rgba(0,0,0,0.1) }}"
+  //   animate={{ background: "linear-gradient(90deg, #fff, #000) }}"
+  // The "}}" that should CLOSE the JSX expression {{ }} is accidentally embedded INSIDE
+  // the CSS string value. The parser then sees the string close and finds a dangling `"`
+  // character on the next attribute line, causing:
+  //   "Expected '</', got 'animate'"   or   "Parsing ecmascript source code failed"
+  // Root cause: when the model serializes JSX props to JSON, it sometimes forgets to escape
+  // the string-closing `"` before `}}`, so the `}}` gets absorbed into the string value.
+  //
+  // Fix: For any double-quoted string in JSX attribute position that ENDS with `}}` (or `}} `),
+  // move the `}}` OUTSIDE the string.
+  //   "blur(10px) }}" → "blur(10px)" }}
+  if (/\.(tsx?|jsx?)$/.test(path)) {
+    const before48 = fixed;
+    // Double-quote variant: match a string that has }} before the closing "
+    // Uses a non-greedy match on the string content, then \s*}} before the closing "
+    fixed = fixed.replace(/("(?:[^"\\]|\\.)*?)\s*\}\}"/g, '$1" }}');
+    // Single-quote variant
+    fixed = fixed.replace(/('(?:[^'\\]|\\.)*?)\s*\}\}'/g, "$1' }}");
+    if (fixed !== before48) {
+      console.log(`[sanitize] 🩹 Repaired JSX closing brace swallowed into string literal in ${path}`);
+    }
+  }
+
+  // 4.9. STYLE PROP MULTI-VALUE STRING REPAIR
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // The LLM generates multi-value style objects where the value string contains the CSS
+  // property separator pattern, e.g.:
+  //   style={{ transform: "translateX(0px), opacity: 1" }}
+  // These look fine, but sometimes the model uses ": " as a separator and the regex
+  // in 4.7 confuses them. This phase is a lighter-weight targeted fix for the most
+  // common remaining pattern: a JSX attribute value that has UNBALANCED quotes because
+  // the string contains the CSS value AND the separator for the next prop value.
+  // e.g.: style={{ filter: "blur(0px), opacity: 1" }} is actually CORRECT CSS syntax
+  // We only intervene when we detect a clearly broken pattern: an attribute line that
+  // has more opening {{ than closing }} (meaning the closer was swallowed).
+  if (/\.(tsx?|jsx?)$/.test(path)) {
+    const before49 = fixed;
+    const jsxLines = fixed.split("\n");
+    for (let i = 0; i < jsxLines.length; i++) {
+      const line = jsxLines[i];
+      // Only look at lines that have a JSX attribute opening (=  {{) but NO closing }}
+      // and the line ends with a string literal (ending with ") or ')
+      const hasOpenExpr = (line.match(/\{\{/g) || []).length;
+      const hasCloseExpr = (line.match(/\}\}/g) || []).length;
+      if (hasOpenExpr > 0 && hasOpenExpr > hasCloseExpr) {
+        // This line has unclosed JSX expressions — the closer is likely on a later line
+        // or was swallowed into a string. Check if the line ends with a quoted string:
+        const trimmed = line.trimEnd();
+        if (trimmed.endsWith('"') || trimmed.endsWith("'")) {
+          // The `}}` may have been moved to the start of the NEXT line
+          // or may be missing entirely — peek at the next line
+          const nextLine = jsxLines[i + 1]?.trimStart();
+          if (nextLine && (nextLine.startsWith("}}") || nextLine.startsWith('"') || nextLine.startsWith("'"))) {
+            // The }} is on the next line — nothing to do here, it's just a multi-line prop
+            continue;
+          }
+          // Otherwise, the }} is likely missing. Check if appending it would balance:
+          const testLine = trimmed + " }}";
+          const testOpen = (testLine.match(/\{\{/g) || []).length;
+          const testClose = (testLine.match(/\}\}/g) || []).length;
+          if (testOpen === testClose) {
+            // Appending }} balances the line
+            jsxLines[i] = trimmed + " }}";
+            console.log(`[sanitize] 🩹 Appended missing }} to JSX attribute line in ${path}: ${trimmed.slice(-40)}`);
+          }
+        }
+      }
+    }
+    fixed = jsxLines.join("\n");
+  }
+
   if (/\.(tsx?|jsx?|css|scss|mjs)$/.test(path)) {
     fixed = sanitizeShadcnUtilities(fixed);
   }
